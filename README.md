@@ -206,18 +206,21 @@ PresharedKey、Endpoint），不会生成或显示客户端私钥。
 
 #### Android
 
-- 从 GitHub Releases 下载 `LiteTunnel-Android-v1.1.0.apk`（或按下面“构建”一节自行编译）；
+- 直接下载：[LiteTunnel-Android-v1.1.0.apk](https://github.com/Brianown/VPN_Android_Windows/raw/main/release/LiteTunnel-Android-v1.1.0.apk)
+  （也可以从 GitHub Releases / Actions Artifact 下载，或按下面“构建”一节自行编译）；
 - 允许“安装未知来源应用”后安装；
 - 打开 App，点右下角 **+**：
   - **扫码**：扫描服务端生成的 `client1.png`；
   - **粘贴**：从聊天软件/剪贴板粘贴完整配置；
   - **文件**：选择下载好的 `.conf`；
 - 点节点 → 系统弹出 VPN 授权 → 允许 → 连接成功。
+- 右上角菜单 → **路由模式**，可切换全局代理 / 智能分流。
 
 应用只保存配置在应用私有目录，**关闭了系统备份**，不会把私钥同步到云端。
 
 #### Windows
 
+- 直接下载：[LiteTunnel-Windows-v1.1.0.exe](https://github.com/Brianown/VPN_Android_Windows/raw/main/release/LiteTunnel-Windows-v1.1.0.exe)；
 1. 先安装官方开源的 [WireGuard for Windows](https://www.wireguard.com/install/)（客户端会调用它的隧道服务）；
 2. 运行 `LiteTunnel.exe`，UAC 选择“是”（需要管理员权限来创建 VPN 服务）；
 3. **导入配置** 或 **粘贴配置**；

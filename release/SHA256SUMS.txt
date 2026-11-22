@@ -1,0 +1,2 @@
+d1356077bcd24cd64cdf44e544439f1622b82e7806a546fe30e019a3163b3b24  LiteTunnel-Android-v1.1.0.apk
+629f4bc8fa693c0fede95d500a31e44d8c573c167bf7c219e294047be77d119e  LiteTunnel-Windows-v1.1.0.exe
