@@ -145,6 +145,9 @@ class MainActivity : AppCompatActivity(), VpnController.Listener {
     override fun onStart() {
         super.onStart()
         VpnController.addListener(this)
+        if (VpnController.state != Tunnel.State.UP) {
+            VpnController.restore(this)
+        }
         if (VpnController.state == Tunnel.State.UP) {
             startMonthlyStats()
         }

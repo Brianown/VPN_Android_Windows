@@ -485,9 +485,9 @@ PrivateKey = ${SERVER_PRIVATE}
 MTU = ${WG_MTU}
 SaveConfig = false
 PostUp = sysctl -w net.ipv4.ip_forward=1 >/dev/null
-PostUp = iptables -C FORWARD -i %i -j ACCEPT 2>/dev/null || iptables -A FORWARD -i %i -j ACCEPT
-PostUp = iptables -C FORWARD -o %i -j ACCEPT 2>/dev/null || iptables -A FORWARD -o %i -j ACCEPT
-PostUp = iptables -t nat -C POSTROUTING -s ${WG_NET}.0/24 -o ${WAN_IF} -j MASQUERADE 2>/dev/null || iptables -t nat -A POSTROUTING -s ${WG_NET}.0/24 -o ${WAN_IF} -j MASQUERADE
+PostUp = iptables -C FORWARD -i %i -j ACCEPT 2>/dev/null || iptables -I FORWARD 1 -i %i -j ACCEPT
+PostUp = iptables -C FORWARD -o %i -j ACCEPT 2>/dev/null || iptables -I FORWARD 1 -o %i -j ACCEPT
+PostUp = iptables -t nat -C POSTROUTING -s ${WG_NET}.0/24 -o ${WAN_IF} -j MASQUERADE 2>/dev/null || iptables -t nat -I POSTROUTING 1 -s ${WG_NET}.0/24 -o ${WAN_IF} -j MASQUERADE
 PostDown = iptables -D FORWARD -i %i -j ACCEPT 2>/dev/null || true
 PostDown = iptables -D FORWARD -o %i -j ACCEPT 2>/dev/null || true
 PostDown = iptables -t nat -D POSTROUTING -s ${WG_NET}.0/24 -o ${WAN_IF} -j MASQUERADE 2>/dev/null || true
@@ -581,8 +581,16 @@ if command -v firewall-cmd >/dev/null 2>&1 && firewall-cmd --state >/dev/null 2>
     firewall-cmd --permanent \
         --add-rich-rule="rule family=\"ipv4\" source address=\"${WG_NET}.0/24\" port port=\"${STATS_PORT}\" protocol=\"tcp\" accept" \
         >/dev/null 2>&1 || true
+    # firewalld 会维护自己的 FORWARD 链，并在末尾放 REJECT。
+    # 仅靠 wg-quick 的 iptables -A 会被 REJECT 挡住，而且 --reload 会清掉它。
+    # 用 firewalld 的永久 direct 规则 + masquerade，保证重启后仍然可转发。
+    firewall-cmd --permanent --direct --query-rule ipv4 filter FORWARD 0 -i "${WG_IF}" -j ACCEPT >/dev/null 2>&1 || \
+        firewall-cmd --permanent --direct --add-rule ipv4 filter FORWARD 0 -i "${WG_IF}" -j ACCEPT >/dev/null 2>&1 || true
+    firewall-cmd --permanent --direct --query-rule ipv4 filter FORWARD 0 -o "${WG_IF}" -j ACCEPT >/dev/null 2>&1 || \
+        firewall-cmd --permanent --direct --add-rule ipv4 filter FORWARD 0 -o "${WG_IF}" -j ACCEPT >/dev/null 2>&1 || true
+    firewall-cmd --permanent --add-masquerade >/dev/null 2>&1 || true
     firewall-cmd --reload >/dev/null 2>&1 || true
-    ok "已放行 firewalld UDP ${WG_PORT}、TCP ${PROBE_PORT}（延迟探测），以及 VPN 内网 TCP ${STATS_PORT}"
+    ok "已放行 firewalld UDP ${WG_PORT}、TCP ${PROBE_PORT}（延迟探测），以及 VPN 内网 TCP ${STATS_PORT}；已配置转发与 NAT"
 fi
 
 # ---------------------------------------------------------------- 管理命令
@@ -745,11 +753,16 @@ WantedBy=multi-user.target
 EOF
 
     systemctl daemon-reload
-    systemctl enable --now litetunnel-probe.service >/dev/null 2>&1 || true
-    if "${PYTHON_BIN}" -c "import socket; s = socket.create_connection(('127.0.0.1', ${PROBE_PORT}), 2); s.close()" 2>/dev/null; then
-        ok "延迟探测服务已启动：TCP ${PROBE_PORT}"
+    if ss -lnt 2>/dev/null | awk '{print $4}' | grep -qE "[:.]${PROBE_PORT}$"; then
+        systemctl disable --now litetunnel-probe.service >/dev/null 2>&1 || true
+        warn "TCP ${PROBE_PORT} 已被其它程序占用，跳过 litetunnel-probe；客户端连接该端口测延迟时使用已有服务。"
     else
-        warn "延迟探测服务未能启动，客户端延迟将显示为 —。"
+        systemctl enable --now litetunnel-probe.service >/dev/null 2>&1 || true
+        if "${PYTHON_BIN}" -c "import socket; s = socket.create_connection(('127.0.0.1', ${PROBE_PORT}), 2); s.close()" 2>/dev/null; then
+            ok "延迟探测服务已启动：TCP ${PROBE_PORT}"
+        else
+            warn "延迟探测服务未能启动，客户端延迟将显示为 —。"
+        fi
     fi
 else
     warn "未找到 latency-probe.py，客户端将无法显示服务器延迟。"

@@ -15,6 +15,11 @@ import java.util.concurrent.Executors
  */
 object VpnController {
 
+    private const val STATE_PREFS = "vpn_runtime_state"
+    private const val KEY_ACTIVE_ID = "active_id"
+    private const val KEY_ACTIVE_NAME = "active_name"
+    private const val KEY_CONNECTED_AT = "connected_at"
+
     interface Listener {
         fun onStateChanged(state: Tunnel.State, profileId: String?)
         fun onError(message: String) {}
@@ -23,6 +28,9 @@ object VpnController {
     private val mainHandler = Handler(Looper.getMainLooper())
     private val executor = Executors.newSingleThreadExecutor()
     private val listeners = CopyOnWriteArraySet<Listener>()
+
+    @Volatile
+    private var appContextRef: Context? = null
 
     @Volatile
     private var backend: GoBackend? = null
@@ -58,6 +66,7 @@ object VpnController {
     fun connect(context: Context, profile: Profile, routeMode: RouteMode = RouteMode.GLOBAL) {
         if (state == Tunnel.State.UP && activeProfileId == profile.id) return
         val appContext = context.applicationContext
+        appContextRef = appContext
         executor.execute {
             try {
                 val configText = if (routeMode == RouteMode.SMART) {
@@ -79,6 +88,9 @@ object VpnController {
                 currentTunnel = tunnel
                 connectedAt = System.currentTimeMillis()
                 updateState(newState, profile.id)
+                if (newState == Tunnel.State.UP) {
+                    saveActive(appContext, profile.id, tunnel.getName(), connectedAt)
+                }
             } catch (e: Exception) {
                 val message = e.message ?: e.javaClass.simpleName
                 mainHandler.post {
@@ -88,9 +100,48 @@ object VpnController {
         }
     }
 
+    /**
+     * App 进程被系统杀掉后，VpnService 可能仍在运行。重新启动时从 GoBackend
+     * 查询真实状态，避免界面错误显示“未连接”，也避免无法断开旧隧道。
+     */
+    fun restore(context: Context) {
+        if (state == Tunnel.State.UP) return
+        val appContext = context.applicationContext
+        appContextRef = appContext
+        executor.execute {
+            val prefs = appContext.getSharedPreferences(STATE_PREFS, Context.MODE_PRIVATE)
+            val id = prefs.getString(KEY_ACTIVE_ID, null)
+            val name = prefs.getString(KEY_ACTIVE_NAME, null)
+            val savedAt = prefs.getLong(KEY_CONNECTED_AT, 0L)
+            if (id.isNullOrBlank() || name.isNullOrBlank()) return@execute
+            try {
+                val tunnel = ProfileTunnel(name) { newState ->
+                    if (newState == Tunnel.State.DOWN) {
+                        connectedAt = 0L
+                        updateState(Tunnel.State.DOWN, null)
+                    }
+                }
+                val goBackend = backend ?: GoBackend(appContext).also { backend = it }
+                val actual = goBackend.getState(tunnel)
+                if (actual == Tunnel.State.UP) {
+                    currentTunnel = tunnel
+                    connectedAt = savedAt
+                    updateState(Tunnel.State.UP, id)
+                } else {
+                    clearActive(appContext)
+                    updateState(Tunnel.State.DOWN, null)
+                }
+            } catch (e: Exception) {
+                clearActive(appContext)
+                updateState(Tunnel.State.DOWN, null)
+            }
+        }
+    }
+
     fun disconnect(context: Context) {
         val tunnel = currentTunnel
         if (tunnel == null) {
+            clearActive(context.applicationContext)
             updateState(Tunnel.State.DOWN, null)
             return
         }
@@ -105,6 +156,7 @@ object VpnController {
             } finally {
                 currentTunnel = null
                 connectedAt = 0L
+                clearActive(context.applicationContext)
                 updateState(Tunnel.State.DOWN, null)
             }
         }
@@ -122,10 +174,32 @@ object VpnController {
         }
     }
 
+    private fun saveActive(context: Context, profileId: String, tunnelName: String, at: Long) {
+        context.getSharedPreferences(STATE_PREFS, Context.MODE_PRIVATE)
+            .edit()
+            .putString(KEY_ACTIVE_ID, profileId)
+            .putString(KEY_ACTIVE_NAME, tunnelName)
+            .putLong(KEY_CONNECTED_AT, at)
+            .apply()
+    }
+
+    private fun clearActive(context: Context?) {
+        context ?: return
+        context.getSharedPreferences(STATE_PREFS, Context.MODE_PRIVATE)
+            .edit()
+            .remove(KEY_ACTIVE_ID)
+            .remove(KEY_ACTIVE_NAME)
+            .remove(KEY_CONNECTED_AT)
+            .apply()
+    }
+
     private fun updateState(newState: Tunnel.State, profileId: String?) {
         state = newState
         activeProfileId = profileId
-        if (newState != Tunnel.State.UP) connectedAt = 0L
+        if (newState != Tunnel.State.UP) {
+            connectedAt = 0L
+            clearActive(appContextRef)
+        }
         mainHandler.post {
             listeners.forEach { it.onStateChanged(newState, profileId) }
         }
