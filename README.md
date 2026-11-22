@@ -65,6 +65,7 @@ VPN_Android_Windows/
 │   └── windows/                # .NET Framework 4.8 WinForms 工程与构建脚本
 ├── docs/
 │   ├── china.md                # 中国大陆网络环境说明
+│   ├── centos7.md              # CentOS 7 / RHEL 7 手动安装说明
 │   ├── privacy.md              # 加密边界、隐私与多跳/匿名网络说明
 │   └── screenshot-*.png
 ├── .github/workflows/build.yml # GitHub Actions：自动构建 APK 和 EXE
@@ -76,7 +77,7 @@ VPN_Android_Windows/
 
 ### 1. 准备服务器
 
-- 一台有公网 IPv4 的 VPS（Debian 11/12、Ubuntu 20.04/22.04/24.04，x86_64 或 arm64）
+- 一台有公网 IPv4 的 VPS（**推荐 Ubuntu 22.04/24.04、Debian 12**；CentOS 7 已 EOL，见 [docs/centos7.md](docs/centos7.md)）
 - 以 `root` 身份操作（或 `sudo`）
 - 在云厂商安全组 / 防火墙中放行 **UDP 51820**（WireGuard）和 **TCP 8443**（延迟探测），或你自定义的端口
 - 确认服务器没有被服务商限制 UDP 或 TUN 转发
@@ -98,6 +99,9 @@ sudo bash /opt/VPN_Android_Windows/server/install.sh
 
 > 仓库名或默认分支不同的话，把上面的 `VPN_Android_Windows` / `main` 换成实际值。
 > 如果服务器上没有 `git`，也可以直接上传 ZIP 解压后运行 `server/install.sh`。
+>
+> 自动安装依赖仅支持 Debian/Ubuntu。**CentOS 7 / RHEL 7 请先阅读 [docs/centos7.md](docs/centos7.md)**，
+> 手动安装 WireGuard 和 Python3 后使用 `SKIP_DEPS=1` 运行。
 
 安装脚本会：
 
@@ -374,6 +378,7 @@ sudo WG_PORT=443 WG_CLIENTS=5 bash /opt/VPN_Android_Windows-main/server/install.
 | `SERVER_LOCATION` | 自动探测 | 显示给客户端的机房位置，如 `美国 洛杉矶` |
 | `SERVER_TYPE` | `服务器` | 服务器类型，也可设为 `家用` |
 | `PROBE_PORT` | `8443` | 公网 TCP 延迟探测端口 |
+| `SKIP_DEPS` | `0` | 设为 `1` 跳过系统包安装（CentOS 7 手动装好依赖后使用） |
 
 修改端口示例：
 

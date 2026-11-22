@@ -119,7 +119,7 @@ def read_wg_dump(args):
     try:
         output = subprocess.check_output(
             [args.wg_binary, "show", args.interface, "dump"],
-            text=True,
+            universal_newlines=True,
             stderr=subprocess.STDOUT,
             timeout=15,
         )

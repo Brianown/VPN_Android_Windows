@@ -18,9 +18,10 @@
 import argparse
 import hmac
 import json
+import socketserver
 import sys
 from datetime import datetime, timedelta, timezone
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import parse_qs, urlparse
 
 try:
@@ -51,6 +52,11 @@ def reset_at_iso(period, tz):
     next_month = 1 if month == 12 else month + 1
     moment = datetime(next_year, next_month, 1, 0, 0, 0, tzinfo=tz)
     return moment.isoformat()
+
+
+class ThreadingHTTPServer(socketserver.ThreadingMixIn, HTTPServer):
+    daemon_threads = True
+    allow_reuse_address = True
 
 
 class TrafficHandler(BaseHTTPRequestHandler):

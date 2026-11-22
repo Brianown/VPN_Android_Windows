@@ -3,6 +3,7 @@
 # LiteTunnel（轻隧）服务端一键安装脚本
 #
 # 适用系统：Debian 11/12、Ubuntu 20.04/22.04/24.04（x86_64 / arm64）
+#           CentOS 7 请先阅读 docs/centos7.md，再使用 SKIP_DEPS=1 运行
 # 需要：root 权限、systemd、可访问公网
 #
 # 用法（在仓库目录中）：
@@ -27,6 +28,7 @@
 #   SERVER_LOCATION=...       客户端展示的机房位置（默认用 ip-api.com 自动探测）
 #   SERVER_TYPE=服务器        客户端展示的类型，可设为 家用
 #   PROBE_PORT=8443           客户端测延迟用的公网 TCP 端口
+#   SKIP_DEPS=1               跳过系统包安装（CentOS 7 等非 Debian 系统请先手动装依赖）
 #
 set -Eeuo pipefail
 
@@ -43,6 +45,7 @@ STATS_TZ="${STATS_TZ:-Asia/Shanghai}"
 SERVER_LOCATION="${SERVER_LOCATION:-}"
 SERVER_TYPE="${SERVER_TYPE:-服务器}"
 PROBE_PORT="${PROBE_PORT:-8443}"
+SKIP_DEPS="${SKIP_DEPS:-0}"
 
 STATE_DIR="/etc/wireguard"
 CONF="${STATE_DIR}/${WG_IF}.conf"
@@ -111,21 +114,37 @@ done
 
 # ---------------------------------------------------------------- 安装依赖
 
-info "更新软件源并安装依赖（wireguard-tools / qrencode / iptables / python3）……"
-export DEBIAN_FRONTEND=noninteractive
-apt-get update -qq
-apt-get install -y -qq --no-install-recommends \
-    wireguard-tools qrencode iptables iproute2 curl ca-certificates python3 >/dev/null
-ok "依赖安装完成"
+if [[ ${SKIP_DEPS} == "1" ]]; then
+    info "SKIP_DEPS=1，跳过系统软件包安装；将检查所需命令是否存在。"
+else
+    command -v apt-get >/dev/null 2>&1 || die \
+        "当前系统没有 apt-get。本脚本的自动安装只支持 Debian/Ubuntu；
+     CentOS 7 / RHEL 请先按 docs/centos7.md 手动安装依赖，然后执行：
+       sudo SKIP_DEPS=1 bash /opt/VPN_Android_Windows-main/server/install.sh
+     推荐直接重装为 Ubuntu 22.04/24.04 或 Debian 12，再运行一键命令。"
+
+    info "更新软件源并安装依赖（wireguard-tools / qrencode / iptables / python3）……"
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get update -qq
+    apt-get install -y -qq --no-install-recommends \
+        wireguard-tools qrencode iptables iproute2 curl ca-certificates python3 >/dev/null
+    ok "依赖安装完成"
+fi
+
+for required in wg ip iptables python3 curl systemctl; do
+    command -v "${required}" >/dev/null 2>&1 || die "缺少命令 ${required}，请先安装依赖（CentOS 7 参考 docs/centos7.md）。"
+done
 
 modprobe wireguard 2>/dev/null || true
 if ! ip link add litetunnel-test type wireguard 2>/dev/null; then
-    info "当前内核没有内置 WireGuard，尝试安装 DKMS 模块（旧内核需要）……"
-    apt-get install -y -qq --no-install-recommends \
-        "linux-headers-$(uname -r)" wireguard-dkms >/dev/null 2>&1 || true
-    modprobe wireguard 2>/dev/null || true
+    if command -v apt-get >/dev/null 2>&1; then
+        info "当前内核没有内置 WireGuard，尝试安装 DKMS 模块（旧内核需要）……"
+        apt-get install -y -qq --no-install-recommends \
+            "linux-headers-$(uname -r)" wireguard-dkms >/dev/null 2>&1 || true
+        modprobe wireguard 2>/dev/null || true
+    fi
     if ! ip link add litetunnel-test type wireguard 2>/dev/null; then
-        die "当前内核不支持 WireGuard。请升级内核，或安装 wireguard-dkms 与对应内核头文件后重试。"
+        die "当前内核不支持 WireGuard。CentOS 7 请按 docs/centos7.md 安装 kmod-wireguard/wireguard-dkms，或重装 Ubuntu/Debian。"
     fi
 fi
 ip link del litetunnel-test 2>/dev/null || true
