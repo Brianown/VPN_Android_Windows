@@ -18,7 +18,7 @@ Windows
 涔熷彲浠ョ敤 sudo litetunnel add 鍚嶇О 缁х画娣诲姞銆?
 鏂囦欢鏍￠獙锛圫HA-256锛?-------------------
 LiteTunnel-Android-v1.1.0.apk
-d1356077bcd24cd64cdf44e544439f1622b82e7806a546fe30e019a3163b3b24
+f57ae311178b89e63c4608dad2c249b6deeb388b04c9ce74fc26f2c46ea90109
 
 LiteTunnel-Windows-v1.1.0.exe
 d92ea8796fd1df685db5794b9ee3e162f10d4062986eedbc96b1fb9ea1142366
