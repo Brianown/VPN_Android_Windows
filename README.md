@@ -100,7 +100,8 @@ sudo bash /opt/VPN_Android_Windows/server/install.sh
 >
 > 一键安装会自动识别 `apt` / `dnf` / `yum` / `zypper` / `pacman`。
 > CentOS 7 会自动尝试切换到 vault 源并安装 EPEL/ELRepo；如果内核模块仍然装不上，
-> 请按 [docs/centos7.md](docs/centos7.md) 手动处理。系统需要 systemd。
+> 会自动安装内置的静态 `wireguard-go`，使用用户态实现继续安装，不需要重启服务器。
+> 用户态速度略低于内核模块，但兼容 CentOS 7 的 3.10 内核。系统需要 systemd。
 
 安装脚本会：
 

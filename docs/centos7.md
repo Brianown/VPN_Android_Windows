@@ -7,7 +7,8 @@
 > 然后直接运行 README 里的一行安装命令。**
 >
 > 新版 `install.sh` 已经会尝试自动处理 CentOS 7（切换 vault 源、装 EPEL/ELRepo、kmod/DKMS）。
-> 如果自动安装仍然失败，再按本页手动处理。
+> 如果内核模块仍然装不上，脚本会自动安装内置的静态 `wireguard-go`，让 `wg-quick`
+> 使用用户态实现继续工作，不需要重启服务器。自动安装仍失败时，再按本页手动处理。
 
 ## 1. 切换到 CentOS Vault 源
 

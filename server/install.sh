@@ -250,6 +250,47 @@ install_dependencies() {
     ok "依赖安装完成"
 }
 
+install_userspace_wireguard() {
+    local arch script_dir src target
+    arch="$(uname -m)"
+    case "${arch}" in
+        x86_64|amd64) arch=amd64 ;;
+        aarch64|arm64) arch=arm64 ;;
+        *) return 1 ;;
+    esac
+
+    target="/usr/local/bin/wireguard-go"
+    if [[ -x ${target} ]]; then
+        return 0
+    fi
+
+    script_dir=""
+    if [[ -n ${BASH_SOURCE[0]:-} && -f ${BASH_SOURCE[0]} ]]; then
+        script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    fi
+    src="${script_dir}/bin/wireguard-go-linux-${arch}"
+
+    if [[ -f ${src} ]]; then
+        install -m 755 "${src}" "${target}"
+    elif [[ -n ${LITETUNNEL_RAW:-} ]]; then
+        curl -fsSL "${LITETUNNEL_RAW%/}/server/bin/wireguard-go-linux-${arch}" -o "${target}" || return 1
+        chmod 755 "${target}"
+    else
+        return 1
+    fi
+
+    modprobe tun 2>/dev/null || true
+    if [[ ! -c /dev/net/tun ]]; then
+        mkdir -p /dev/net
+        mknod /dev/net/tun c 10 200 2>/dev/null || true
+        chmod 600 /dev/net/tun 2>/dev/null || true
+    fi
+    [[ -c /dev/net/tun ]] || return 1
+    command -v wireguard-go >/dev/null 2>&1 || return 1
+    ok "已安装 wireguard-go 用户态实现（内核无模块时 wg-quick 会自动使用）"
+    return 0
+}
+
 ensure_wireguard_module() {
     local allow_install="$1"
     modprobe wireguard 2>/dev/null || true
@@ -289,12 +330,20 @@ ensure_wireguard_module() {
         modprobe wireguard 2>/dev/null || true
     fi
 
-    if ! ip link add litetunnel-test type wireguard 2>/dev/null; then
-        die "当前内核没有可用的 WireGuard 模块。
-     CentOS 7 / RHEL 请参考 docs/centos7.md 安装 kmod-wireguard 或 wireguard-dkms；
-     其它系统请确认内核已启用 CONFIG_WIREGUARD，或安装 wireguard-dkms。"
+    if ip link add litetunnel-test type wireguard 2>/dev/null; then
+        ip link del litetunnel-test 2>/dev/null || true
+        return 0
     fi
-    ip link del litetunnel-test 2>/dev/null || true
+
+    # 内核模块不可用（CentOS 7 等旧内核很常见）：安装静态 wireguard-go，
+    # wg-quick 会自动回退到用户态实现，不需要内核模块。
+    if install_userspace_wireguard; then
+        warn "当前内核没有 WireGuard 模块，已切换为 wireguard-go 用户态实现（速度略低，但可用）。"
+        return 0
+    fi
+
+    die "当前内核没有可用的 WireGuard 模块，且无法安装用户态 wireguard-go。
+     CentOS 7 / RHEL 请参考 docs/centos7.md，或重装 Ubuntu/Debian。"
 }
 
 if [[ ${SKIP_DEPS} == "1" ]]; then
