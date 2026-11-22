@@ -193,7 +193,9 @@ PersistentKeepalive = 25
 EOF
     chmod 600 "${CLIENT_DIR}/${name}.conf"
     if command -v qrencode >/dev/null 2>&1; then
-        qrencode -o "${CLIENT_DIR}/${name}.png" -r "${CLIENT_DIR}/${name}.conf" -s 8 -m 2
+        # CentOS 7 的 qrencode 3.4.1 不支持 -r，使用 stdin
+        qrencode -o "${CLIENT_DIR}/${name}.png" -s 8 -m 2 < "${CLIENT_DIR}/${name}.conf" || \
+            warn "二维码生成失败，但 .conf 配置已生成，可直接导入。"
     fi
 
     if systemctl is-active --quiet "wg-quick@${WG_IF}" 2>/dev/null; then
@@ -412,7 +414,7 @@ cmd_qr() {
     valid_name "${name}" || die "客户端名称不合法。"
     local file="${CLIENT_DIR}/${name}.conf"
     [[ -f ${file} ]] || die "找不到客户端配置：${file}"
-    command -v qrencode >/dev/null 2>&1 || die "未安装 qrencode，请执行 apt-get install -y qrencode"
+    command -v qrencode >/dev/null 2>&1 || die "未安装 qrencode，请先安装 qrencode 包。"
     qrencode -t ANSIUTF8 < "${file}"
 }
 

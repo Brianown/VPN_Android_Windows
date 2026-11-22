@@ -92,8 +92,16 @@ case "${ID:-}" in
 esac
 
 if [[ -f ${CONF} ]]; then
-    die "检测到已存在的 ${CONF}。如需重新安装，请先执行：sudo litetunnel uninstall（或手动删除该文件）
+    if ! systemctl is-active --quiet "wg-quick@${WG_IF}" && ! command -v litetunnel >/dev/null 2>&1; then
+        backup_dir="/root/litetunnel-backup-$(date +%Y%m%d%H%M%S)"
+        warn "检测到上次安装未完成（配置存在但服务未运行），备份到 ${backup_dir} 后继续。"
+        mkdir -p "${backup_dir}"
+        mv "${CONF}" "${backup_dir}/wg0.conf" 2>/dev/null || true
+        [[ -d ${CLIENT_DIR} ]] && mv "${CLIENT_DIR}" "${backup_dir}/clients" 2>/dev/null || true
+    else
+        die "检测到已存在的 ${CONF}。如需重新安装，请先执行：sudo litetunnel uninstall（或手动删除该文件）
      添加客户端请使用：sudo litetunnel add 手机名称"
+    fi
 fi
 
 [[ ${WG_IF} =~ ^[a-zA-Z0-9_=+.-]{1,15}$ ]] || die "WG_IF 不合法：${WG_IF}"
@@ -530,7 +538,9 @@ PersistentKeepalive = 25
 EOF
     chmod 600 "${CLIENT_DIR}/${name}.conf"
     if command -v qrencode >/dev/null 2>&1; then
-        qrencode -o "${CLIENT_DIR}/${name}.png" -r "${CLIENT_DIR}/${name}.conf" -s 8 -m 2
+        # CentOS 7 自带的 qrencode 3.4.1 不支持 -r，改用 stdin 读取配置
+        qrencode -o "${CLIENT_DIR}/${name}.png" -s 8 -m 2 < "${CLIENT_DIR}/${name}.conf" || \
+            warn "客户端 ${name} 的二维码生成失败，但 .conf 配置已生成，可直接导入。"
     fi
 }
 
