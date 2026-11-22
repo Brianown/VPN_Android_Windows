@@ -294,7 +294,9 @@ install_userspace_wireguard() {
     cat > "/etc/systemd/system/wg-quick@${WG_IF}.service.d/userspace.conf" <<EOF
 [Service]
 Environment=WG_QUICK_USERSPACE_IMPLEMENTATION=/usr/local/bin/wireguard-go
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin
 EOF
+    systemctl daemon-reload >/dev/null 2>&1 || true
 
     ok "已安装 wireguard-go 用户态实现（内核无模块时 wg-quick 会自动使用）"
     return 0
@@ -373,7 +375,7 @@ fi
 
 PYTHON_BIN="$(command -v python3 || command -v python3.6 || command -v python || true)"
 [[ -n ${PYTHON_BIN} ]] || die "找不到 python3/python，请先安装 Python 3。"
-for required in wg ip iptables curl systemctl; do
+for required in wg wg-quick ip iptables curl systemctl; do
     command -v "${required}" >/dev/null 2>&1 || die "缺少命令 ${required}，请先安装依赖。"
 done
 
