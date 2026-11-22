@@ -308,6 +308,15 @@ ensure_wireguard_module() {
         return 0
     fi
 
+    # CentOS 7 的 3.10 内核上 DKMS 经常失败，直接使用内置的静态用户态实现，
+    # 避免在一台 EOL 系统上长时间编译。
+    if [[ ${ID:-} == "centos" && ${VERSION_ID:-} == 7* ]]; then
+        if install_userspace_wireguard; then
+            warn "CentOS 7 内核无 WireGuard 模块，已切换为 wireguard-go 用户态实现（速度略低，但可用）。"
+            return 0
+        fi
+    fi
+
     if [[ ${allow_install} == "1" ]]; then
         case "${PM}" in
             apt)
