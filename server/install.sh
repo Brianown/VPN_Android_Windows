@@ -46,6 +46,8 @@ SERVER_LOCATION="${SERVER_LOCATION:-}"
 SERVER_TYPE="${SERVER_TYPE:-服务器}"
 PROBE_PORT="${PROBE_PORT:-8443}"
 SKIP_DEPS="${SKIP_DEPS:-0}"
+PM=""
+PKG=""
 
 STATE_DIR="/etc/wireguard"
 CONF="${STATE_DIR}/${WG_IF}.conf"
@@ -82,10 +84,10 @@ command -v systemctl >/dev/null 2>&1 || die "未找到 systemd，本脚本仅支
 # shellcheck disable=SC1091
 . /etc/os-release
 case "${ID:-}" in
-    debian|ubuntu|raspbian|linuxmint|pop)
+    debian|ubuntu|raspbian|linuxmint|pop|centos|rhel|rocky|almalinux|ol|fedora|opensuse*|sles|arch|manjaro)
         ;;
     *)
-        warn "当前系统为 ${PRETTY_NAME:-未知}，脚本只在 Debian/Ubuntu 上验证过，继续尝试……"
+        warn "当前系统为 ${PRETTY_NAME:-未知}，将尝试自动适配包管理器；如果失败请手动安装依赖。"
         ;;
 esac
 
@@ -205,7 +207,11 @@ install_dependencies() {
             ;;
         dnf)
             if [[ ${ID:-} != "fedora" ]]; then
-                "${PKG}" install -y epel-release >/dev/null 2>&1 || true
+                local el_major
+                el_major="$(rpm -E '%{rhel}' 2>/dev/null || true)"
+                [[ ${el_major} =~ ^[0-9]+$ ]] || el_major="${VERSION_ID%%.*}"
+                "${PKG}" install -y epel-release >/dev/null 2>&1 || \
+                    "${PKG}" install -y "https://dl.fedoraproject.org/pub/epel/epel-release-latest-${el_major}.noarch.rpm" >/dev/null 2>&1 || true
                 install_elrepo
             fi
             "${PKG}" install -y wireguard-tools iptables iproute python3 curl ca-certificates >/dev/null
@@ -218,7 +224,9 @@ install_dependencies() {
             fix_centos7_repos
             install_epel7
             install_elrepo
-            yum install -y wireguard-tools iptables iproute python3 curl ca-certificates >/dev/null
+            yum install -y wireguard-tools iptables iproute curl ca-certificates >/dev/null
+            yum install -y python3 >/dev/null 2>&1 || \
+                yum install -y python36 >/dev/null 2>&1 || die "无法安装 Python 3。"
             yum install -y qrencode >/dev/null 2>&1 || warn "qrencode 未安装，客户端二维码将不可用。"
             yum --enablerepo=elrepo install -y kmod-wireguard >/dev/null 2>&1 || true
             ;;
@@ -255,6 +263,15 @@ ensure_wireguard_module() {
                     "${PKG}" install -y dkms gcc make \
                         "kernel-devel-$(uname -r)" "kernel-headers-$(uname -r)" >/dev/null 2>&1 || true
                     "${PKG}" install -y wireguard-dkms >/dev/null 2>&1 || true
+                    if ! ip link add litetunnel-test type wireguard 2>/dev/null; then
+                        if [[ ${PM} == "yum" ]]; then
+                            "${PKG}" install -y yum-plugin-copr >/dev/null 2>&1 || true
+                        else
+                            "${PKG}" install -y dnf-plugins-core >/dev/null 2>&1 || true
+                        fi
+                        "${PKG}" copr enable -y jdoss/wireguard >/dev/null 2>&1 || true
+                        "${PKG}" install -y wireguard-dkms >/dev/null 2>&1 || true
+                    fi
                 fi
                 ;;
             zypper)
@@ -279,7 +296,7 @@ else
     install_dependencies
 fi
 
-PYTHON_BIN="$(command -v python3 || command -v python || true)"
+PYTHON_BIN="$(command -v python3 || command -v python3.6 || command -v python || true)"
 [[ -n ${PYTHON_BIN} ]] || die "找不到 python3/python，请先安装 Python 3。"
 for required in wg ip iptables curl systemctl; do
     command -v "${required}" >/dev/null 2>&1 || die "缺少命令 ${required}，请先安装依赖。"
