@@ -22,6 +22,9 @@ WG_ENDPOINT="${WG_ENDPOINT:-}"
 CLIENT_DIR="${CLIENT_DIR:-/root/litetunnel/clients}"
 STATS_PORT="${STATS_PORT:-8080}"
 STATS_TZ="${STATS_TZ:-Asia/Shanghai}"
+SERVER_LOCATION="${SERVER_LOCATION:-未知}"
+SERVER_TYPE="${SERVER_TYPE:-服务器}"
+PROBE_PORT="${PROBE_PORT:-8443}"
 CONF="/etc/wireguard/${WG_IF}.conf"
 
 if [[ -t 1 ]]; then
@@ -167,6 +170,10 @@ EOF
     chmod 700 "${CLIENT_DIR}"
     cat > "${CLIENT_DIR}/${name}.conf" <<EOF
 # Name = ${name}
+# ServerIP = ${WG_ENDPOINT}
+# Location = ${SERVER_LOCATION}
+# ServerType = ${SERVER_TYPE}
+# ProbePort = ${PROBE_PORT}
 # StatsURL = http://${WG_NET}.1:${STATS_PORT}/api/traffic
 # StatsToken = ${token}
 [Interface]
@@ -273,6 +280,8 @@ cmd_server_key() {
     require_install
     printf '服务器公钥 : %s\n' "$(server_public_key)"
     printf 'Endpoint   : %s:%s\n' "${WG_ENDPOINT}" "${WG_PORT}"
+    printf '服务器位置 : %s（%s）\n' "${SERVER_LOCATION}" "${SERVER_TYPE}"
+    printf '延迟探测   : TCP %s\n' "${PROBE_PORT}"
     printf '虚拟网段   : %s.0/24\n' "${WG_NET}"
     printf '服务端配置 : %s\n' "${CONF}"
 }
@@ -317,6 +326,10 @@ EOF
     cat > "${peer_file}" <<EOF
 # 客户端 ${name} 的 Peer 信息
 # 你已有自己的客户端私钥；请把下面的内容合并到你的 WireGuard 配置中。
+# ServerIP = ${WG_ENDPOINT}
+# Location = ${SERVER_LOCATION}
+# ServerType = ${SERVER_TYPE}
+# ProbePort = ${PROBE_PORT}
 # StatsURL = http://${WG_NET}.1:${STATS_PORT}/api/traffic
 # StatsToken = ${token}
 [Interface]
@@ -469,6 +482,11 @@ cmd_status() {
     else
         warn "流量统计 API 未运行（客户端会显示：暂时无法获取）"
     fi
+    if systemctl is-active --quiet litetunnel-probe.service 2>/dev/null; then
+        ok "延迟探测服务正在运行（TCP ${PROBE_PORT}）"
+    else
+        warn "延迟探测服务未运行（客户端延迟会显示 —）"
+    fi
     if command -v ss >/dev/null 2>&1; then
         printf '\nUDP %s 监听状态：\n' "${WG_PORT}"
         ss -lunp 2>/dev/null | grep -E ":${WG_PORT}[[:space:]]" || warn "未看到监听（可能需要 root 权限查看）"
@@ -485,12 +503,13 @@ cmd_uninstall() {
         info "已取消。"
         exit 0
     fi
-    systemctl disable --now litetunnel-api.service litetunnel-traffic.timer >/dev/null 2>&1 || true
+    systemctl disable --now litetunnel-api.service litetunnel-traffic.timer litetunnel-probe.service >/dev/null 2>&1 || true
     systemctl disable --now "wg-quick@${WG_IF}" >/dev/null 2>&1 || true
     rm -f "${CONF}" "${ENV_FILE}" /etc/sysctl.d/99-litetunnel.conf /usr/local/bin/litetunnel
     rm -f /etc/systemd/system/litetunnel-traffic.service \
         /etc/systemd/system/litetunnel-traffic.timer \
-        /etc/systemd/system/litetunnel-api.service
+        /etc/systemd/system/litetunnel-api.service \
+        /etc/systemd/system/litetunnel-probe.service
     rm -rf /usr/local/lib/litetunnel /var/lib/litetunnel /root/litetunnel
     systemctl daemon-reload
     ok "LiteTunnel 已卸载。WireGuard 软件包保留在系统中。"

@@ -24,6 +24,9 @@
 #   WG_PRINT_CONFIGS=1        安装完成后打印所有客户端导入内容（含私钥；设为 0 关闭）
 #   STATS_PORT=8080           客户端查询月度流量的 API 端口（只监听 VPN 内网）
 #   STATS_TZ=Asia/Shanghai    月度流量清零使用的时区
+#   SERVER_LOCATION=...       客户端展示的机房位置（默认用 ip-api.com 自动探测）
+#   SERVER_TYPE=服务器        客户端展示的类型，可设为 家用
+#   PROBE_PORT=8443           客户端测延迟用的公网 TCP 端口
 #
 set -Eeuo pipefail
 
@@ -37,6 +40,9 @@ CLIENT_PREFIX="${CLIENT_PREFIX:-client}"
 WG_PRINT_CONFIGS="${WG_PRINT_CONFIGS:-1}"
 STATS_PORT="${STATS_PORT:-8080}"
 STATS_TZ="${STATS_TZ:-Asia/Shanghai}"
+SERVER_LOCATION="${SERVER_LOCATION:-}"
+SERVER_TYPE="${SERVER_TYPE:-服务器}"
+PROBE_PORT="${PROBE_PORT:-8443}"
 
 STATE_DIR="/etc/wireguard"
 CONF="${STATE_DIR}/${WG_IF}.conf"
@@ -98,6 +104,10 @@ done
 [[ ${CLIENT_PREFIX} =~ ^[a-zA-Z0-9_-]{1,10}$ ]] || die "CLIENT_PREFIX 只能包含字母、数字、下划线、短横线，且不超过 10 个字符"
 [[ ${STATS_PORT} =~ ^[0-9]+$ ]] || die "STATS_PORT 必须是数字"
 (( 10#${STATS_PORT} >= 1 && 10#${STATS_PORT} <= 65535 )) || die "STATS_PORT 必须是 1-65535 的数字"
+[[ ${PROBE_PORT} =~ ^[0-9]+$ ]] || die "PROBE_PORT 必须是数字"
+(( 10#${PROBE_PORT} >= 1 && 10#${PROBE_PORT} <= 65535 )) || die "PROBE_PORT 必须是 1-65535 的数字"
+[[ ${PROBE_PORT} != "${WG_PORT}" ]] || die "PROBE_PORT 不能与 WireGuard UDP 端口相同"
+[[ ${PROBE_PORT} != "${STATS_PORT}" ]] || die "PROBE_PORT 不能与 STATS_PORT 相同"
 
 # ---------------------------------------------------------------- 安装依赖
 
@@ -154,6 +164,38 @@ ENDPOINT="${WG_ENDPOINT:-$(detect_endpoint)}"
     "无法自动检测公网 IPv4。若服务器在 NAT 后面，请手动执行：
      sudo WG_ENDPOINT=你的公网IP bash server/install.sh"
 ok "服务器公网地址：${ENDPOINT}:${WG_PORT}/udp"
+
+detect_location() {
+    local json location
+    if [[ -n ${SERVER_LOCATION} ]]; then
+        printf '%s' "${SERVER_LOCATION}"
+        return 0
+    fi
+    json="$(curl -fsS --max-time 6 \
+        "http://ip-api.com/json/${ENDPOINT}?fields=status,country,regionName,city&lang=zh-CN" \
+        2>/dev/null || true)"
+    [[ -n ${json} ]] || return 0
+    location="$(printf '%s' "${json}" | python3 -c '
+import json, sys
+try:
+    data = json.load(sys.stdin)
+except Exception:
+    sys.exit(0)
+if data.get("status") != "success":
+    sys.exit(0)
+country = str(data.get("country") or "").strip()
+city = str(data.get("city") or data.get("regionName") or "").strip()
+print(" ".join(part for part in (country, city) if part))
+' 2>/dev/null || true)"
+    printf '%s' "${location}"
+}
+
+SERVER_LOCATION="$(detect_location)"
+SERVER_LOCATION="${SERVER_LOCATION:-未知}"
+SERVER_LOCATION="$(printf '%s' "${SERVER_LOCATION}" | tr -d '\r\n' | cut -c1-40)"
+SERVER_TYPE="$(printf '%s' "${SERVER_TYPE}" | tr -d '\r\n' | cut -c1-20)"
+[[ -n ${SERVER_TYPE} ]] || SERVER_TYPE="服务器"
+ok "服务器位置：${SERVER_LOCATION}（${SERVER_TYPE}），延迟探测端口：TCP ${PROBE_PORT}"
 
 # ---------------------------------------------------------------- 生成密钥
 
@@ -216,6 +258,10 @@ EOF
 
     cat > "${CLIENT_DIR}/${name}.conf" <<EOF
 # Name = ${name}
+# ServerIP = ${ENDPOINT}
+# Location = ${SERVER_LOCATION}
+# ServerType = ${SERVER_TYPE}
+# ProbePort = ${PROBE_PORT}
 # StatsURL = http://${WG_NET}.1:${STATS_PORT}/api/traffic
 # StatsToken = ${token}
 [Interface]
@@ -263,17 +309,19 @@ ok "WireGuard 已启动并监听 UDP ${WG_PORT}"
 
 if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q "Status: active"; then
     ufw allow "${WG_PORT}/udp" >/dev/null 2>&1 || true
+    ufw allow "${PROBE_PORT}/tcp" >/dev/null 2>&1 || true
     ufw allow from "${WG_NET}.0/24" to any port "${STATS_PORT}" proto tcp >/dev/null 2>&1 || true
-    ok "已放行 UFW UDP ${WG_PORT}，以及 VPN 内网 TCP ${STATS_PORT}"
+    ok "已放行 UFW UDP ${WG_PORT}、TCP ${PROBE_PORT}（延迟探测），以及 VPN 内网 TCP ${STATS_PORT}"
 fi
 
 if command -v firewall-cmd >/dev/null 2>&1 && firewall-cmd --state >/dev/null 2>&1; then
     firewall-cmd --permanent --add-port="${WG_PORT}/udp" >/dev/null 2>&1 || true
+    firewall-cmd --permanent --add-port="${PROBE_PORT}/tcp" >/dev/null 2>&1 || true
     firewall-cmd --permanent \
         --add-rich-rule="rule family=\"ipv4\" source address=\"${WG_NET}.0/24\" port port=\"${STATS_PORT}\" protocol=\"tcp\" accept" \
         >/dev/null 2>&1 || true
     firewall-cmd --reload >/dev/null 2>&1 || true
-    ok "已放行 firewalld UDP ${WG_PORT}，以及 VPN 内网 TCP ${STATS_PORT}"
+    ok "已放行 firewalld UDP ${WG_PORT}、TCP ${PROBE_PORT}（延迟探测），以及 VPN 内网 TCP ${STATS_PORT}"
 fi
 
 # ---------------------------------------------------------------- 管理命令
@@ -288,6 +336,9 @@ WG_ENDPOINT=${ENDPOINT}
 CLIENT_DIR=${CLIENT_DIR}
 STATS_PORT=${STATS_PORT}
 STATS_TZ=${STATS_TZ}
+SERVER_LOCATION="${SERVER_LOCATION}"
+SERVER_TYPE="${SERVER_TYPE}"
+PROBE_PORT=${PROBE_PORT}
 EOF
 chmod 600 "${ENV_FILE}"
 
@@ -315,11 +366,15 @@ fi
 
 STATS_SRC=""
 API_SRC=""
+PROBE_SRC=""
 if [[ -n ${SCRIPT_DIR} && -f ${SCRIPT_DIR}/traffic-stats.py ]]; then
     STATS_SRC="${SCRIPT_DIR}/traffic-stats.py"
 fi
 if [[ -n ${SCRIPT_DIR} && -f ${SCRIPT_DIR}/traffic-api.py ]]; then
     API_SRC="${SCRIPT_DIR}/traffic-api.py"
+fi
+if [[ -n ${SCRIPT_DIR} && -f ${SCRIPT_DIR}/latency-probe.py ]]; then
+    PROBE_SRC="${SCRIPT_DIR}/latency-probe.py"
 fi
 if [[ -z ${STATS_SRC} && -n ${LITETUNNEL_RAW:-} ]]; then
     curl -fsSL "${LITETUNNEL_RAW%/}/server/traffic-stats.py" -o /tmp/litetunnel-traffic-stats.py
@@ -328,6 +383,10 @@ fi
 if [[ -z ${API_SRC} && -n ${LITETUNNEL_RAW:-} ]]; then
     curl -fsSL "${LITETUNNEL_RAW%/}/server/traffic-api.py" -o /tmp/litetunnel-traffic-api.py
     API_SRC=/tmp/litetunnel-traffic-api.py
+fi
+if [[ -z ${PROBE_SRC} && -n ${LITETUNNEL_RAW:-} ]]; then
+    curl -fsSL "${LITETUNNEL_RAW%/}/server/latency-probe.py" -o /tmp/litetunnel-latency-probe.py
+    PROBE_SRC=/tmp/litetunnel-latency-probe.py
 fi
 
 if [[ -n ${STATS_SRC} && -n ${API_SRC} ]]; then
@@ -403,6 +462,38 @@ else
     warn "未找到 traffic-stats.py / traffic-api.py，客户端将无法显示服务端月度流量。"
 fi
 
+# ---------------------------------------------------------------- 延迟探测
+
+if [[ -n ${PROBE_SRC} ]]; then
+    install -d -m 755 /usr/local/lib/litetunnel
+    install -m 755 "${PROBE_SRC}" /usr/local/lib/litetunnel/latency-probe.py
+
+    cat > /etc/systemd/system/litetunnel-probe.service <<EOF
+[Unit]
+Description=LiteTunnel TCP latency probe
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /usr/local/lib/litetunnel/latency-probe.py --bind 0.0.0.0 --port ${PROBE_PORT}
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+    systemctl daemon-reload
+    systemctl enable --now litetunnel-probe.service >/dev/null 2>&1 || true
+    if python3 -c "import socket; s = socket.create_connection(('127.0.0.1', ${PROBE_PORT}), 2); s.close()" 2>/dev/null; then
+        ok "延迟探测服务已启动：TCP ${PROBE_PORT}"
+    else
+        warn "延迟探测服务未能启动，客户端延迟将显示为 —。"
+    fi
+else
+    warn "未找到 latency-probe.py，客户端将无法显示服务器延迟。"
+fi
+
 # ---------------------------------------------------------------- 完成信息
 
 printf '\n%s%s 安装完成！%s\n\n' "${C_GREEN}" "${C_BOLD}" "${C_RESET}"
@@ -410,6 +501,8 @@ cat <<EOF
 服务器公网地址 : ${ENDPOINT}
 WireGuard 端口 : ${WG_PORT}/udp
 服务器公钥     : ${SERVER_PUBLIC}
+服务器位置     : ${SERVER_LOCATION}（${SERVER_TYPE}）
+延迟探测端口   : TCP ${PROBE_PORT}
 虚拟网段       : ${WG_NET}.0/24
 服务端配置     : ${CONF}
 客户端配置目录 : ${CLIENT_DIR}
@@ -433,7 +526,7 @@ ${C_BOLD}下一步：${C_RESET}
   4. 再添加客户端：sudo litetunnel add 手机名称
 
 ${C_BOLD}重要：${C_RESET}
-  * 云服务器（阿里云/腾讯云/AWS/Oracle 等）还需在控制台的安全组/防火墙中放行 UDP ${WG_PORT}；
+  * 云服务器（阿里云/腾讯云/AWS/Oracle 等）还需在控制台的安全组/防火墙中放行 UDP ${WG_PORT} 和 TCP ${PROBE_PORT}；
   * Oracle Cloud 默认还有实例内 iptables 规则，必要时手动放行；
   * 客户端私钥只保存在本机，请勿把 .conf 或二维码发给别人；
   * 中国大陆网络对 UDP 的干扰较严重，WireGuard 可能不稳定；

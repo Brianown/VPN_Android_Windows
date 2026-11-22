@@ -13,11 +13,18 @@ class ProfileAdapter(
 
     private var items: List<Profile> = emptyList()
     private var activeId: String? = null
+    private val latencies = mutableMapOf<String, Long?>()
 
     fun submit(profiles: List<Profile>, activeProfileId: String?) {
         items = profiles
         activeId = activeProfileId
         notifyDataSetChanged()
+    }
+
+    fun updateLatency(profileId: String, latencyMs: Long?) {
+        latencies[profileId] = latencyMs
+        val index = items.indexOfFirst { it.id == profileId }
+        if (index >= 0) notifyItemChanged(index)
     }
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ViewHolder {
@@ -35,11 +42,13 @@ class ProfileAdapter(
         val connected = profile.id == activeId
 
         holder.binding.nameText.text = profile.name
-        holder.binding.endpointText.text = endpointOf(profile.config)
+        holder.binding.endpointText.text = serverSummaryOf(profile.config)
         holder.binding.stateText.text = if (connected) "已连接" else "点击连接"
         holder.binding.stateText.setTextColor(
             context.getColor(if (connected) R.color.success else R.color.muted)
         )
+        holder.binding.latencyText.text = formatLatency(latencies[profile.id])
+        holder.binding.latencyText.setTextColor(context.getColor(R.color.muted))
         holder.binding.dot.backgroundTintList = ColorStateList.valueOf(
             context.getColor(if (connected) R.color.success else R.color.muted)
         )

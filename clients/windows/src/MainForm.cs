@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.IO;
+using System.Net.Sockets;
 using System.Reflection;
 using System.Text;
 using System.Windows.Forms;
@@ -36,6 +37,7 @@ namespace LiteTunnel
         private LinkLabel installLink;
         private Timer refreshTimer;
         private Timer monthlyTimer;
+        private Timer latencyTimer;
         private bool monthlyFetching;
         private string monthlyStatsTunnel;
 
@@ -92,6 +94,11 @@ namespace LiteTunnel
             monthlyTimer = new Timer();
             monthlyTimer.Interval = 60000;
             monthlyTimer.Tick += delegate { RefreshMonthlyStats(); };
+
+            latencyTimer = new Timer();
+            latencyTimer.Interval = 30000;
+            latencyTimer.Tick += delegate { MeasureLatencies(); };
+            latencyTimer.Start();
         }
 
         private Control BuildHeader()
@@ -273,8 +280,10 @@ namespace LiteTunnel
             profileList.BackColor = Color.White;
             profileList.ForeColor = Ink;
             profileList.Font = new Font("Microsoft YaHei UI", 9F);
-            profileList.Columns.Add("节点名称", 230, HorizontalAlignment.Left);
-            profileList.Columns.Add("服务器", 300, HorizontalAlignment.Left);
+            profileList.Columns.Add("节点名称", 190, HorizontalAlignment.Left);
+            profileList.Columns.Add("服务器 IP", 180, HorizontalAlignment.Left);
+            profileList.Columns.Add("位置 / 类型", 250, HorizontalAlignment.Left);
+            profileList.Columns.Add("延迟", 90, HorizontalAlignment.Left);
             profileList.Columns.Add("状态", 100, HorizontalAlignment.Left);
             profileList.SelectedIndexChanged += delegate { RefreshState(); };
             profileList.DoubleClick += delegate { ToggleConnection(); };
@@ -408,8 +417,8 @@ namespace LiteTunnel
                 ProfileInfo profile = item.Tag as ProfileInfo;
                 bool isRunning = profile != null && running != null
                     && string.Equals(profile.TunnelName, running, StringComparison.OrdinalIgnoreCase);
-                item.SubItems[2].Text = isRunning ? "运行中" : "已停止";
-                item.SubItems[2].ForeColor = isRunning ? Color.FromArgb(22, 163, 74) : Muted;
+                item.SubItems[4].Text = isRunning ? "运行中" : "已停止";
+                item.SubItems[4].ForeColor = isRunning ? Color.FromArgb(22, 163, 74) : Muted;
             }
         }
 
@@ -639,9 +648,25 @@ namespace LiteTunnel
             profileList.Items.Clear();
             foreach (ProfileInfo profile in profiles)
             {
+                string configText = string.Empty;
+                try
+                {
+                    configText = File.ReadAllText(profile.FilePath, Encoding.UTF8);
+                }
+                catch (Exception)
+                {
+                }
+                string host = ProfileStore.GetServerHost(configText);
+                if (string.IsNullOrEmpty(host))
+                    host = profile.Endpoint;
+                string location = ProfileStore.GetLocation(configText);
+                string serverType = ProfileStore.GetServerType(configText);
+
                 ListViewItem item = new ListViewItem(profile.DisplayName);
                 item.UseItemStyleForSubItems = false;
-                item.SubItems.Add(profile.Endpoint);
+                item.SubItems.Add(host);
+                item.SubItems.Add(location + " · " + serverType);
+                item.SubItems.Add("— ms");
                 item.SubItems.Add("已停止");
                 item.Tag = profile;
                 profileList.Items.Add(item);
@@ -658,6 +683,7 @@ namespace LiteTunnel
                 profileList.Items[0].Selected = true;
 
             RefreshState();
+            MeasureLatencies();
         }
 
         private void SelectTunnel(string tunnelName)
@@ -955,18 +981,113 @@ namespace LiteTunnel
                 (card.ClientSize.Height - connectButton.Height) / 2);
         }
 
+        private void MeasureLatencies()
+        {
+            foreach (ProfileInfo profile in profiles)
+            {
+                string text;
+                try
+                {
+                    text = File.ReadAllText(profile.FilePath, Encoding.UTF8);
+                }
+                catch (Exception)
+                {
+                    SetLatencyItem(profile, "— ms");
+                    continue;
+                }
+
+                string host = ProfileStore.GetServerHost(text);
+                int port = ProfileStore.GetProbePort(text);
+                if (string.IsNullOrEmpty(host) || port == 0)
+                {
+                    SetLatencyItem(profile, "— ms");
+                    continue;
+                }
+
+                string tunnelName = profile.TunnelName;
+                System.Threading.ThreadPool.QueueUserWorkItem(delegate
+                {
+                    long? latency = TcpLatency(host, port);
+                    if (IsDisposed)
+                        return;
+                    try
+                    {
+                        BeginInvoke(new MethodInvoker(delegate
+                        {
+                            if (IsDisposed)
+                                return;
+                            foreach (ListViewItem item in profileList.Items)
+                            {
+                                ProfileInfo itemProfile = item.Tag as ProfileInfo;
+                                if (itemProfile != null && string.Equals(itemProfile.TunnelName,
+                                    tunnelName, StringComparison.OrdinalIgnoreCase))
+                                {
+                                    item.SubItems[3].Text = latency.HasValue
+                                        ? latency.Value + " ms" : "— ms";
+                                    break;
+                                }
+                            }
+                        }));
+                    }
+                    catch (InvalidOperationException)
+                    {
+                    }
+                });
+            }
+        }
+
+        private void SetLatencyItem(ProfileInfo profile, string text)
+        {
+            if (profileList == null)
+                return;
+            foreach (ListViewItem item in profileList.Items)
+            {
+                ProfileInfo itemProfile = item.Tag as ProfileInfo;
+                if (itemProfile != null && string.Equals(itemProfile.TunnelName,
+                    profile.TunnelName, StringComparison.OrdinalIgnoreCase))
+                {
+                    item.SubItems[3].Text = text;
+                    break;
+                }
+            }
+        }
+
+        private static long? TcpLatency(string host, int port)
+        {
+            Stopwatch watch = Stopwatch.StartNew();
+            try
+            {
+                using (TcpClient client = new TcpClient())
+                {
+                    IAsyncResult result = client.BeginConnect(host, port, null, null);
+                    if (!result.AsyncWaitHandle.WaitOne(1500))
+                        return null;
+                    client.EndConnect(result);
+                    return watch.ElapsedMilliseconds;
+                }
+            }
+            catch (Exception)
+            {
+                return null;
+            }
+        }
+
         private void AdjustColumns()
         {
-            if (profileList == null || profileList.Columns.Count < 3)
+            if (profileList == null || profileList.Columns.Count < 5)
                 return;
             int width = profileList.ClientSize.Width - 4;
-            if (width < 360)
+            if (width < 500)
                 return;
-            int first = (int)(width * 0.30);
-            int second = (int)(width * 0.45);
+            int first = (int)(width * 0.22);
+            int second = (int)(width * 0.22);
+            int third = (int)(width * 0.28);
+            int fourth = (int)(width * 0.12);
             profileList.Columns[0].Width = first;
             profileList.Columns[1].Width = second;
-            profileList.Columns[2].Width = Math.Max(80, width - first - second);
+            profileList.Columns[2].Width = third;
+            profileList.Columns[3].Width = fourth;
+            profileList.Columns[4].Width = Math.Max(70, width - first - second - third - fourth);
         }
 
         private static GraphicsPath RoundedRect(Rectangle bounds, int radius)
@@ -997,6 +1118,11 @@ namespace LiteTunnel
             {
                 monthlyTimer.Stop();
                 monthlyTimer.Dispose();
+            }
+            if (latencyTimer != null)
+            {
+                latencyTimer.Stop();
+                latencyTimer.Dispose();
             }
             base.OnFormClosed(e);
         }

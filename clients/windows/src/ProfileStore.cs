@@ -28,6 +28,12 @@ namespace LiteTunnel
             new Regex(@"^#\s*StatsURL\s*=\s*(\S+)", RegexOptions.Multiline);
         private static readonly Regex StatsTokenRegex =
             new Regex(@"^#\s*StatsToken\s*=\s*(\S+)", RegexOptions.Multiline);
+        private static readonly Regex LocationRegex =
+            new Regex(@"^#\s*Location\s*=\s*(.+)$", RegexOptions.Multiline);
+        private static readonly Regex ServerTypeRegex =
+            new Regex(@"^#\s*ServerType\s*=\s*(.+)$", RegexOptions.Multiline);
+        private static readonly Regex ProbePortRegex =
+            new Regex(@"^#\s*ProbePort\s*=\s*(\d+)\s*$", RegexOptions.Multiline);
         private static readonly Regex InterfaceRegex =
             new Regex(@"^\s*\[Interface\]\s*$", RegexOptions.Multiline);
         private static readonly Regex PeerRegex =
@@ -237,6 +243,53 @@ namespace LiteTunnel
                 return null;
             Match match = StatsTokenRegex.Match(text);
             return match.Success ? match.Groups[1].Value.Trim() : null;
+        }
+
+        public static string GetServerHost(string text)
+        {
+            string endpoint = GetEndpoint(text);
+            if (string.IsNullOrEmpty(endpoint))
+                return null;
+            if (endpoint.StartsWith("["))
+            {
+                int end = endpoint.IndexOf(']');
+                return end > 1 ? endpoint.Substring(1, end - 1) : null;
+            }
+            int colon = endpoint.LastIndexOf(':');
+            return colon > 0 ? endpoint.Substring(0, colon) : endpoint;
+        }
+
+        public static string GetLocation(string text)
+        {
+            if (string.IsNullOrEmpty(text))
+                return "未知";
+            Match match = LocationRegex.Match(text);
+            if (!match.Success)
+                return "未知";
+            string location = match.Groups[1].Value.Trim();
+            return location.Length == 0 ? "未知" : location;
+        }
+
+        public static string GetServerType(string text)
+        {
+            if (string.IsNullOrEmpty(text))
+                return "未知";
+            Match match = ServerTypeRegex.Match(text);
+            if (!match.Success)
+                return "未知";
+            string type = match.Groups[1].Value.Trim();
+            return type.Length == 0 ? "未知" : type;
+        }
+
+        public static int GetProbePort(string text)
+        {
+            if (string.IsNullOrEmpty(text))
+                return 0;
+            Match match = ProbePortRegex.Match(text);
+            int port;
+            if (match.Success && int.TryParse(match.Groups[1].Value, out port) && port > 0 && port <= 65535)
+                return port;
+            return 0;
         }
 
         public static string SanitizeTunnelName(string raw)

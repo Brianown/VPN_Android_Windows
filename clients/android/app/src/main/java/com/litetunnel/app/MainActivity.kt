@@ -27,6 +27,8 @@ import com.litetunnel.app.databinding.DialogEditProfileBinding
 import com.wireguard.android.backend.Tunnel
 import com.wireguard.config.Config
 import java.io.ByteArrayInputStream
+import java.net.InetSocketAddress
+import java.net.Socket
 import java.util.UUID
 import java.util.concurrent.Executors
 
@@ -53,6 +55,15 @@ class MainActivity : AppCompatActivity(), VpnController.Listener {
         override fun run() {
             refreshMonthlyStats()
             monthlyHandler.postDelayed(this, 60_000L)
+        }
+    }
+
+    private val latencyHandler = Handler(Looper.getMainLooper())
+    private val latencyExecutor = Executors.newFixedThreadPool(4)
+    private val latencyRunnable = object : Runnable {
+        override fun run() {
+            measureLatencies()
+            latencyHandler.postDelayed(this, 30_000L)
         }
     }
 
@@ -132,12 +143,15 @@ class MainActivity : AppCompatActivity(), VpnController.Listener {
         if (VpnController.state == Tunnel.State.UP) {
             startMonthlyStats()
         }
+        latencyHandler.removeCallbacks(latencyRunnable)
+        latencyHandler.post(latencyRunnable)
     }
 
     override fun onStop() {
         VpnController.removeListener(this)
         statsHandler.removeCallbacks(statsRunnable)
         monthlyHandler.removeCallbacks(monthlyRunnable)
+        latencyHandler.removeCallbacks(latencyRunnable)
         super.onStop()
     }
 
@@ -270,6 +284,36 @@ class MainActivity : AppCompatActivity(), VpnController.Listener {
         }
     }
 
+    // ---------------- 服务器延迟 ----------------
+
+    private fun measureLatencies() {
+        val snapshot = profiles.toList()
+        if (snapshot.isEmpty()) return
+        for (profile in snapshot) {
+            val host = serverHostOf(profile.config) ?: continue
+            val port = probePortOf(profile.config) ?: continue
+            latencyExecutor.execute {
+                val latency = tcpLatency(host, port)
+                runOnUiThread {
+                    if (isFinishing || isDestroyed) return@runOnUiThread
+                    adapter.updateLatency(profile.id, latency)
+                }
+            }
+        }
+    }
+
+    private fun tcpLatency(host: String, port: Int): Long? {
+        val started = System.nanoTime()
+        return try {
+            Socket().use { socket ->
+                socket.connect(InetSocketAddress(host, port), 1500)
+            }
+            (System.nanoTime() - started) / 1_000_000
+        } catch (e: Exception) {
+            null
+        }
+    }
+
     // ---------------- 节点管理 ----------------
 
     private fun showProfileMenu(profile: Profile) {
@@ -392,6 +436,7 @@ class MainActivity : AppCompatActivity(), VpnController.Listener {
                 }
                 store.save(profiles)
                 refreshList()
+                measureLatencies()
                 dialog.dismiss()
                 toast(if (profile == null) "节点已添加" else "节点已更新")
             }
