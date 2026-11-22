@@ -225,8 +225,9 @@ PresharedKey、Endpoint），不会生成或显示客户端私钥。
 #### Windows
 
 - 直接下载：[LiteTunnel-Windows-v1.1.0.exe](https://github.com/Brianown/VPN_Android_Windows/raw/main/release/LiteTunnel-Windows-v1.1.0.exe)；
-1. 首次连接时如果检测不到 **WireGuard for Windows**，客户端会提示通过 `winget` 自动下载安装；
-   也可以手动安装：[WireGuard for Windows](https://www.wireguard.com/install/)；
+1. 首次连接时如果检测不到 **WireGuard for Windows**，客户端会优先从本仓库下载官方 MSI 并静默安装
+   （不依赖 wireguard.com），失败后再尝试 `winget`；也可以手动下载
+   [WireGuard-amd64-1.1.1.msi](https://github.com/Brianown/VPN_Android_Windows/raw/main/release/WireGuard-amd64-1.1.1.msi)；
 2. 运行 `LiteTunnel.exe`，UAC 选择“是”（需要管理员权限来创建 VPN 服务）；
 3. **导入配置** 或 **粘贴配置**；
 4. 选中节点 → **连接**。

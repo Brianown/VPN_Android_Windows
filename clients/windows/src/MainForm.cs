@@ -685,7 +685,8 @@ namespace LiteTunnel
         {
             DialogResult answer = MessageBox.Show(this,
                 "未检测到 WireGuard for Windows。\r\n\r\n" +
-                "轻隧需要调用官方 WireGuard 的隧道服务。是否现在通过 winget 自动下载并安装？\r\n" +
+                "轻隧需要调用官方 WireGuard 的隧道服务。是否现在自动下载并安装？\r\n" +
+                "会优先从 GitHub 下载官方 MSI（不依赖 wireguard.com），失败后再尝试 winget。\r\n" +
                 "安装过程需要管理员权限。",
                 "需要安装 WireGuard",
                 MessageBoxButtons.YesNo, MessageBoxIcon.Question);
@@ -710,12 +711,12 @@ namespace LiteTunnel
                 MessageBox.Show(this,
                     "自动安装 WireGuard 失败。\r\n\r\n" + message,
                     "安装失败", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                if (MessageBox.Show(this, "是否打开 WireGuard 官方下载页面手动安装？",
+                if (MessageBox.Show(this, "是否打开 Microsoft Store 搜索 WireGuard？",
                         "手动安装", MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.Yes)
                 {
                     try
                     {
-                        Process.Start("https://www.wireguard.com/install/");
+                        Process.Start("ms-windows-store://search?query=WireGuard");
                     }
                     catch (Exception)
                     {

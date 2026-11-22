@@ -21,6 +21,6 @@ LiteTunnel-Android-v1.1.0.apk
 f57ae311178b89e63c4608dad2c249b6deeb388b04c9ce74fc26f2c46ea90109
 
 LiteTunnel-Windows-v1.1.0.exe
-5e5a7784ddcdda2b55aac8fa6ffcac135ea71e9afb63cf95397f563995ab0a32
+1ca6e3cd5252c35a3cf6abe6b59c9cc6c87ba0e27a1d41f693e5e56c444f78a8
 
 鏈」鐩互 Apache-2.0 鍗忚寮€婧愶紝浠呬緵鍚堟硶鐢ㄩ€斻€

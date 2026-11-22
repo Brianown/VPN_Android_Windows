@@ -43,6 +43,9 @@
     <EmbeddedResource Include="assets\non_china_ipv4.txt">
       <LogicalName>non_china_ipv4.txt</LogicalName>
     </EmbeddedResource>
+    <EmbeddedResource Include="..\..\release\WireGuard-amd64-1.1.1.msi">
+      <LogicalName>WireGuard-amd64-1.1.1.msi</LogicalName>
+    </EmbeddedResource>
     <None Include="app.manifest" />
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />

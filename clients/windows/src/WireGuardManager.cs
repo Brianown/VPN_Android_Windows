@@ -3,7 +3,12 @@ using System.Collections.Generic;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
+using System.Net;
+using System.Reflection;
+using System.Security.Cryptography;
+using System.Security.Cryptography.X509Certificates;
 using System.ServiceProcess;
+using System.Text;
 using System.Threading;
 
 namespace LiteTunnel
@@ -15,6 +20,11 @@ namespace LiteTunnel
     public static class WireGuardManager
     {
         private const string ServicePrefix = "WireGuardTunnel$";
+        private const string WireGuardMsiUrl =
+            "https://github.com/Brianown/VPN_Android_Windows/raw/main/release/WireGuard-amd64-1.1.1.msi";
+        private const string WireGuardMsiResource = "WireGuard-amd64-1.1.1.msi";
+        private const string WireGuardMsiSha256 =
+            "7bfed60ad61b785c914b38b61555a975488e1d3ec472dbfb2fcdf498fca75242";
 
         public static string FindWireGuardExe()
         {
@@ -66,16 +76,123 @@ namespace LiteTunnel
         }
 
         /// <summary>
-        /// 通过 Windows 自带的 winget 静默安装官方 WireGuard.WireGuard 包。
-        /// 需要当前进程具有管理员权限（LiteTunnel 的 manifest 已要求 requireAdministrator）。
+        /// 优先从项目 GitHub 仓库下载官方 MSI（不依赖无法访问的 wireguard.com），
+        /// 失败后再尝试 winget。需要管理员权限。
         /// </summary>
         public static bool InstallWireGuard(out string message)
+        {
+            string msiMessage;
+            if (TryInstallFromGithubMsi(out msiMessage))
+            {
+                message = string.Empty;
+                return true;
+            }
+
+            string wingetMessage;
+            if (TryInstallWithWinget(out wingetMessage))
+            {
+                message = string.Empty;
+                return true;
+            }
+
+            message = "自动安装 WireGuard 失败。\r\n\r\n"
+                + msiMessage + "\r\n\r\n" + wingetMessage;
+            return false;
+        }
+
+        private static bool TryInstallFromGithubMsi(out string message)
+        {
+            message = string.Empty;
+            string directory = Path.Combine(Path.GetTempPath(), "LiteTunnel-WireGuard");
+            string msi = Path.Combine(directory, "WireGuard-amd64-1.1.1.msi");
+            try
+            {
+                Directory.CreateDirectory(directory);
+                if (!File.Exists(msi) || !HasExpectedHash(msi))
+                {
+                    if (File.Exists(msi))
+                        File.Delete(msi);
+
+                    // EXE 内嵌官方 MSI，优先离线释放；没有内嵌资源时再从 GitHub 下载。
+                    bool extracted = false;
+                    using (Stream resource = Assembly.GetExecutingAssembly()
+                        .GetManifestResourceStream(WireGuardMsiResource))
+                    {
+                        if (resource != null)
+                        {
+                            using (FileStream fileStream = File.Create(msi))
+                            {
+                                resource.CopyTo(fileStream);
+                            }
+                            extracted = true;
+                        }
+                    }
+
+                    if (!extracted)
+                    {
+                        ServicePointManager.SecurityProtocol |= SecurityProtocolType.Tls12;
+                        using (WebClient client = new WebClient())
+                        {
+                            client.Headers.Add("User-Agent", "LiteTunnel");
+                            client.DownloadFile(WireGuardMsiUrl, msi);
+                        }
+                    }
+                }
+
+                if (!HasExpectedHash(msi))
+                {
+                    message = "下载到的 WireGuard 安装包 SHA-256 校验失败，已拒绝安装。";
+                    try { File.Delete(msi); } catch (Exception) { }
+                    return false;
+                }
+
+                // 双重检查 Authenticode 签名者，防止仓库被替换成其它 MSI。
+                try
+                {
+                    X509Certificate certificate = X509Certificate.CreateFromSignedFile(msi);
+                    if (certificate == null ||
+                        certificate.Subject.IndexOf("WireGuard LLC", StringComparison.OrdinalIgnoreCase) < 0)
+                    {
+                        message = "WireGuard 安装包签名者不是 WireGuard LLC，已拒绝安装。";
+                        return false;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    message = "无法验证 WireGuard 安装包签名：" + ex.Message;
+                    return false;
+                }
+
+                string msiexec = Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.System), "msiexec.exe");
+                string output;
+                int code = Run(msiexec,
+                    "/i \"" + msi + "\" /qn /norestart REBOOT=ReallySuppress DO_NOT_LAUNCH=1",
+                    600000, out output);
+
+                if (WaitForWireGuardInstalled(15))
+                {
+                    try { File.Delete(msi); } catch (Exception) { }
+                    return true;
+                }
+
+                message = "MSI 安装失败（退出码 " + code + "）。\r\n" + TrimOutput(output);
+                return false;
+            }
+            catch (Exception ex)
+            {
+                message = "从 GitHub 下载/安装 WireGuard 失败：" + ex.Message;
+                return false;
+            }
+        }
+
+        private static bool TryInstallWithWinget(out string message)
         {
             message = string.Empty;
             string winget = FindWinget();
             if (string.IsNullOrEmpty(winget))
             {
-                message = "未找到 winget。请安装“应用安装程序”，或从 https://www.wireguard.com/install/ 手动安装。";
+                message = "未找到 winget。";
                 return false;
             }
 
@@ -87,23 +204,47 @@ namespace LiteTunnel
                     "--accept-package-agreements --accept-source-agreements --disable-interactivity",
                     600000, out output);
 
-                // winget 有时返回“已安装”的非零码，最终以文件是否存在为准。
-                for (int i = 0; i < 10; i++)
-                {
-                    if (FindWireGuardExe() != null)
-                    {
-                        message = string.Empty;
-                        return true;
-                    }
-                    Thread.Sleep(1000);
-                }
+                if (WaitForWireGuardInstalled(10))
+                    return true;
 
                 message = "winget 安装失败（退出码 " + code + "）。\r\n" + TrimOutput(output);
                 return false;
             }
             catch (Exception ex)
             {
-                message = "自动安装 WireGuard 失败：" + ex.Message;
+                message = "winget 安装失败：" + ex.Message;
+                return false;
+            }
+        }
+
+        private static bool WaitForWireGuardInstalled(int seconds)
+        {
+            for (int i = 0; i < seconds; i++)
+            {
+                if (FindWireGuardExe() != null)
+                    return true;
+                Thread.Sleep(1000);
+            }
+            return FindWireGuardExe() != null;
+        }
+
+        private static bool HasExpectedHash(string path)
+        {
+            try
+            {
+                using (SHA256 sha = SHA256.Create())
+                using (FileStream stream = File.OpenRead(path))
+                {
+                    byte[] hash = sha.ComputeHash(stream);
+                    StringBuilder builder = new StringBuilder(hash.Length * 2);
+                    foreach (byte b in hash)
+                        builder.Append(b.ToString("x2"));
+                    return string.Equals(builder.ToString(), WireGuardMsiSha256,
+                        StringComparison.OrdinalIgnoreCase);
+                }
+            }
+            catch (Exception)
+            {
                 return false;
             }
         }

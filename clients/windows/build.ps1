@@ -27,11 +27,15 @@ if (-not $csc) {
 $icon = Join-Path $PSScriptRoot 'assets\litetunnel.ico'
 $manifest = Join-Path $PSScriptRoot 'app.manifest'
 $routeList = Join-Path $PSScriptRoot 'assets\non_china_ipv4.txt'
+$wireGuardMsi = Join-Path $PSScriptRoot '..\..\release\WireGuard-amd64-1.1.1.msi'
 if (-not (Test-Path $icon)) {
     throw "缺少图标文件：$icon"
 }
 if (-not (Test-Path $routeList)) {
     throw "缺少智能分流列表：$routeList"
+}
+if (-not (Test-Path $wireGuardMsi)) {
+    throw "缺少 WireGuard 离线安装包：$wireGuardMsi"
 }
 
 New-Item -ItemType Directory -Force -Path $OutputDir | Out-Null
@@ -48,6 +52,7 @@ $arguments = @(
     ('/win32icon:' + $icon),
     ('/win32manifest:' + $manifest),
     ('/resource:' + $routeList + ',non_china_ipv4.txt'),
+    ('/resource:' + $wireGuardMsi + ',WireGuard-amd64-1.1.1.msi'),
     ('/out:' + (Join-Path $OutputDir 'LiteTunnel.exe')),
     '/reference:System.dll',
     '/reference:System.Core.dll',

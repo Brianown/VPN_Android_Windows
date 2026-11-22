@@ -1,2 +1,3 @@
 f57ae311178b89e63c4608dad2c249b6deeb388b04c9ce74fc26f2c46ea90109  LiteTunnel-Android-v1.1.0.apk
-5e5a7784ddcdda2b55aac8fa6ffcac135ea71e9afb63cf95397f563995ab0a32  LiteTunnel-Windows-v1.1.0.exe
+1ca6e3cd5252c35a3cf6abe6b59c9cc6c87ba0e27a1d41f693e5e56c444f78a8  LiteTunnel-Windows-v1.1.0.exe
+7bfed60ad61b785c914b38b61555a975488e1d3ec472dbfb2fcdf498fca75242  WireGuard-amd64-1.1.1.msi

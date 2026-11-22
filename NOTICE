@@ -16,7 +16,8 @@ Third-party components:
   licensed under the Apache License 2.0.
 - 智能分流使用的 IPv4 路由分类数据由 APNIC delegated-apnic-latest 生成，
   仅用于区分中国/非中国公网 IP 段。
-- WireGuard for Windows, Copyright WireGuard LLC, licensed under GPL-2.0.
+- WireGuard for Windows, Copyright WireGuard LLC, licensed under the MIT License.
+  release/WireGuard-amd64-1.1.1.msi 是未经修改的官方安装包，许可证见 release/WireGuard-COPYING。
 - wireguard-go, Copyright WireGuard LLC, licensed under the MIT License.
   server/bin/ 下的静态二进制由上游 0.0.20230223 源码以 CGO_ENABLED=0 构建。
   It is not bundled with this project; the Windows client calls the
