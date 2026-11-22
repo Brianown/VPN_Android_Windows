@@ -177,6 +177,8 @@ install_epel7() {
             warn "EPEL 7 安装失败，qrencode 等包可能无法安装。"
     }
     if [[ -f /etc/yum.repos.d/epel.repo ]]; then
+        # $basearch 由 yum 展开，不能被 shell 展开
+        # shellcheck disable=SC2016
         sed -i -e 's|^metalink=|#metalink=|' \
             -e 's|^#baseurl=.*epel/7|baseurl=https://archives.fedoraproject.org/pub/archive/epel/7/$basearch|' \
             /etc/yum.repos.d/epel.repo 2>/dev/null || true
