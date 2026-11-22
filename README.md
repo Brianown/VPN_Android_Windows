@@ -13,6 +13,8 @@
   <img src="docs/screenshot-windows.png" width="480" alt="Windows 客户端" />
 </p>
 
+<p align="center"><sub>界面示意（示例节点，非真实服务器）</sub></p>
+
 ## 功能
 
 - **服务端一键安装**：Debian / Ubuntu，自动安装依赖、开启转发、配置 NAT、生成密钥和客户端、生成二维码、注册 systemd 服务。
@@ -303,6 +305,10 @@ sudo WG_PORT=443 WG_ENDPOINT=你的公网IP bash /opt/litetunnel-main/server/ins
 3. 把 README 中的 `YOUR_GITHUB_USER` 替换成你的用户名；
 4. 在 Actions 中等待构建完成，下载 Artifact；
 5. 创建 Release（例如 `v1.0.0`），上传 APK 和 EXE。
+
+> 随附的 `litetunnel-v1.0.0.zip` 中包含预编译的 APK / EXE（位于 `release/`）。
+> `release/` 已被 `.gitignore` 忽略，发布时建议把这两个文件上传到 GitHub Release，
+> 而不是直接提交进 Git 仓库。
 
 ```bash
 git init
