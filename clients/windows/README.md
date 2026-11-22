@@ -7,7 +7,7 @@
 ## 运行要求
 
 - Windows 10 / 11（自带 .NET Framework 4.8）
-- 已安装 WireGuard for Windows
+- 首次连接时如果未安装 WireGuard for Windows，会提示通过 winget 自动安装；也可手动安装
 - 管理员权限（UAC 提示）
 
 ## 构建

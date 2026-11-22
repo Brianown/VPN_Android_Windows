@@ -21,10 +21,13 @@ namespace LiteTunnel
             List<string> candidates = new List<string>();
             string programFiles = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles);
             string programFilesX86 = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86);
+            string localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
             if (!string.IsNullOrEmpty(programFiles))
                 candidates.Add(Path.Combine(programFiles, "WireGuard", "wireguard.exe"));
             if (!string.IsNullOrEmpty(programFilesX86))
                 candidates.Add(Path.Combine(programFilesX86, "WireGuard", "wireguard.exe"));
+            if (!string.IsNullOrEmpty(localAppData))
+                candidates.Add(Path.Combine(localAppData, "Programs", "WireGuard", "wireguard.exe"));
 
             string path = Environment.GetEnvironmentVariable("PATH");
             if (!string.IsNullOrEmpty(path))
@@ -60,6 +63,88 @@ namespace LiteTunnel
         public static bool IsInstalled
         {
             get { return FindWireGuardExe() != null; }
+        }
+
+        /// <summary>
+        /// 通过 Windows 自带的 winget 静默安装官方 WireGuard.WireGuard 包。
+        /// 需要当前进程具有管理员权限（LiteTunnel 的 manifest 已要求 requireAdministrator）。
+        /// </summary>
+        public static bool InstallWireGuard(out string message)
+        {
+            message = string.Empty;
+            string winget = FindWinget();
+            if (string.IsNullOrEmpty(winget))
+            {
+                message = "未找到 winget。请安装“应用安装程序”，或从 https://www.wireguard.com/install/ 手动安装。";
+                return false;
+            }
+
+            try
+            {
+                string output;
+                int code = Run(winget,
+                    "install --id WireGuard.WireGuard -e --silent --scope machine " +
+                    "--accept-package-agreements --accept-source-agreements --disable-interactivity",
+                    600000, out output);
+
+                // winget 有时返回“已安装”的非零码，最终以文件是否存在为准。
+                for (int i = 0; i < 10; i++)
+                {
+                    if (FindWireGuardExe() != null)
+                    {
+                        message = string.Empty;
+                        return true;
+                    }
+                    Thread.Sleep(1000);
+                }
+
+                message = "winget 安装失败（退出码 " + code + "）。\r\n" + TrimOutput(output);
+                return false;
+            }
+            catch (Exception ex)
+            {
+                message = "自动安装 WireGuard 失败：" + ex.Message;
+                return false;
+            }
+        }
+
+        private static string FindWinget()
+        {
+            string localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+            if (!string.IsNullOrEmpty(localAppData))
+            {
+                string candidate = Path.Combine(localAppData, "Microsoft", "WindowsApps", "winget.exe");
+                if (File.Exists(candidate))
+                    return candidate;
+            }
+
+            string path = Environment.GetEnvironmentVariable("PATH");
+            if (!string.IsNullOrEmpty(path))
+            {
+                foreach (string dir in path.Split(Path.PathSeparator))
+                {
+                    try
+                    {
+                        if (dir.Trim().Length == 0)
+                            continue;
+                        string candidate = Path.Combine(dir.Trim(), "winget.exe");
+                        if (File.Exists(candidate))
+                            return candidate;
+                    }
+                    catch (Exception)
+                    {
+                    }
+                }
+            }
+            return null;
+        }
+
+        private static string TrimOutput(string output)
+        {
+            if (string.IsNullOrEmpty(output))
+                return string.Empty;
+            output = output.Trim();
+            return output.Length > 2000 ? output.Substring(output.Length - 2000) : output;
         }
 
         public static List<string> GetRunningTunnelNames()
