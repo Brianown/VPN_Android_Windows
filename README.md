@@ -85,9 +85,7 @@ VPN_Android_Windows/
 ### 2. 一行命令安装服务端
 
 ```bash
-curl -fsSL https://github.com/Brianown/VPN_Android_Windows/archive/refs/heads/main.tar.gz -o /tmp/vpn.tar.gz \
-  && sudo tar xzf /tmp/vpn.tar.gz -C /opt \
-  && sudo bash /opt/VPN_Android_Windows-main/server/install.sh
+curl -fsSL https://github.com/Brianown/VPN_Android_Windows/archive/refs/heads/main.tar.gz -o /tmp/vpn.tar.gz && sudo tar xzf /tmp/vpn.tar.gz -C /opt && sudo bash /opt/VPN_Android_Windows-main/server/install.sh
 ```
 
 如果 GitHub 访问慢，也可以先把仓库下载/上传到服务器，然后执行：
