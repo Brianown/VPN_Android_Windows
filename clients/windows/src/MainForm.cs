@@ -42,6 +42,10 @@ namespace LiteTunnel
         private bool monthlyFetching;
         private string monthlyStatsTunnel;
         private bool runningSmartMode;
+        private NotifyIcon trayIcon;
+        private ContextMenuStrip trayMenu;
+        private bool allowExit;
+        private bool trayHintShown;
 
         private List<ProfileInfo> profiles = new List<ProfileInfo>();
         private bool busy;
@@ -101,6 +105,71 @@ namespace LiteTunnel
             latencyTimer.Interval = 30000;
             latencyTimer.Tick += delegate { MeasureLatencies(); };
             latencyTimer.Start();
+
+            InitializeTray();
+        }
+
+        private void InitializeTray()
+        {
+            trayMenu = new ContextMenuStrip();
+            ToolStripMenuItem showItem = new ToolStripMenuItem("显示主界面");
+            showItem.Click += delegate { ShowFromTray(); };
+            ToolStripMenuItem exitItem = new ToolStripMenuItem("退出 LiteTunnel");
+            exitItem.Click += delegate { ExitApplication(); };
+            trayMenu.Items.Add(showItem);
+            trayMenu.Items.Add(new ToolStripSeparator());
+            trayMenu.Items.Add(exitItem);
+
+            trayIcon = new NotifyIcon();
+            trayIcon.Icon = Icon ?? SystemIcons.Application;
+            trayIcon.Text = "轻隧 LiteTunnel";
+            trayIcon.ContextMenuStrip = trayMenu;
+            trayIcon.Visible = true;
+            trayIcon.DoubleClick += delegate { ShowFromTray(); };
+        }
+
+        private void HideToTray()
+        {
+            Hide();
+            if (!trayHintShown && trayIcon != null)
+            {
+                trayHintShown = true;
+                trayIcon.ShowBalloonTip(3000, "轻隧 LiteTunnel",
+                    "程序已隐藏到托盘，VPN 保持连接。右键托盘图标，选择“退出 LiteTunnel”才会真正退出。",
+                    ToolTipIcon.Info);
+            }
+        }
+
+        private void ShowFromTray()
+        {
+            Show();
+            if (WindowState == FormWindowState.Minimized)
+                WindowState = FormWindowState.Normal;
+            Activate();
+            BringToFront();
+        }
+
+        private void ExitApplication()
+        {
+            if (busy)
+                return;
+
+            // 只有托盘菜单里的“退出”才真正结束进程；退出前断开本程序创建的隧道。
+            string running = FindActiveTunnelName();
+            if (running != null)
+            {
+                try
+                {
+                    WireGuardManager.StopTunnel(running);
+                }
+                catch (Exception)
+                {
+                }
+            }
+            allowExit = true;
+            if (trayIcon != null)
+                trayIcon.Visible = false;
+            Close();
         }
 
         private Control BuildHeader()
@@ -1155,6 +1224,17 @@ namespace LiteTunnel
                 latencyTimer.Stop();
                 latencyTimer.Dispose();
             }
+            if (trayIcon != null)
+            {
+                trayIcon.Visible = false;
+                trayIcon.Dispose();
+                trayIcon = null;
+            }
+            if (trayMenu != null)
+            {
+                trayMenu.Dispose();
+                trayMenu = null;
+            }
             base.OnFormClosed(e);
         }
 
@@ -1163,6 +1243,12 @@ namespace LiteTunnel
             if (busy)
             {
                 e.Cancel = true;
+                return;
+            }
+            if (!allowExit && e.CloseReason != CloseReason.WindowsShutDown)
+            {
+                e.Cancel = true;
+                HideToTray();
                 return;
             }
             base.OnFormClosing(e);

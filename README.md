@@ -19,7 +19,7 @@
 
 ## 功能
 
-- **服务端一键安装**：Debian / Ubuntu，自动安装依赖、开启转发、配置 NAT、生成密钥和客户端、生成二维码、注册 systemd 服务。
+- **服务端一键安装**：自动适配 Debian/Ubuntu、RHEL/CentOS/Rocky/Alma/Fedora、openSUSE、Arch/Manjaro，安装依赖、开启转发、配置 NAT、生成密钥和客户端、生成二维码、注册 systemd 服务。
 - **安卓客户端**：Kotlin + Material 3，支持扫码 / 粘贴 / 导入 `.conf`，多节点管理、连接状态、实时流量统计。
 - **Windows 客户端**：C# WinForms，单文件 exe，导入 / 粘贴配置，一键连接 / 断开，自动检测官方 WireGuard for Windows。
 - **多服务端列表**：可以导入多个不同 VPS 的配置，列表切换连接；每个节点显示服务器 IP、机房位置、家用/服务器类型和 TCP 探测延迟。
@@ -100,8 +100,9 @@ sudo bash /opt/VPN_Android_Windows/server/install.sh
 > 仓库名或默认分支不同的话，把上面的 `VPN_Android_Windows` / `main` 换成实际值。
 > 如果服务器上没有 `git`，也可以直接上传 ZIP 解压后运行 `server/install.sh`。
 >
-> 自动安装依赖仅支持 Debian/Ubuntu。**CentOS 7 / RHEL 7 请先阅读 [docs/centos7.md](docs/centos7.md)**，
-> 手动安装 WireGuard 和 Python3 后使用 `SKIP_DEPS=1` 运行。
+> 一键安装会自动识别 `apt` / `dnf` / `yum` / `zypper` / `pacman`。
+> CentOS 7 会自动尝试切换到 vault 源并安装 EPEL/ELRepo；如果内核模块仍然装不上，
+> 请按 [docs/centos7.md](docs/centos7.md) 手动处理。系统需要 systemd。
 
 安装脚本会：
 
@@ -230,7 +231,8 @@ PresharedKey、Endpoint），不会生成或显示客户端私钥。
 3. **导入配置** 或 **粘贴配置**；
 4. 选中节点 → **连接**。
 
-> 关闭 LiteTunnel 窗口不会自动断开 VPN；重新打开客户端即可看到连接状态并断开。
+> 点击窗口右上角关闭按钮**不会退出程序**，而是隐藏到系统托盘，VPN 继续保持连接；
+> 只有右键托盘图标 → **退出 LiteTunnel** 才会结束进程（并断开本程序创建的隧道）。
 > LiteTunnel 只管理自己的配置目录中的隧道，不会影响你用官方 WireGuard 客户端创建的其它隧道。
 
 ### 6. 不想用自带客户端？
@@ -378,7 +380,7 @@ sudo WG_PORT=443 WG_CLIENTS=5 bash /opt/VPN_Android_Windows-main/server/install.
 | `SERVER_LOCATION` | 自动探测 | 显示给客户端的机房位置，如 `美国 洛杉矶` |
 | `SERVER_TYPE` | `服务器` | 服务器类型，也可设为 `家用` |
 | `PROBE_PORT` | `8443` | 公网 TCP 延迟探测端口 |
-| `SKIP_DEPS` | `0` | 设为 `1` 跳过系统包安装（CentOS 7 手动装好依赖后使用） |
+| `SKIP_DEPS` | `0` | 设为 `1` 跳过系统包安装（手动装好依赖后使用） |
 
 修改端口示例：
 

@@ -27,6 +27,8 @@ SERVER_TYPE="${SERVER_TYPE:-服务器}"
 PROBE_PORT="${PROBE_PORT:-8443}"
 CONF="/etc/wireguard/${WG_IF}.conf"
 
+PYTHON_BIN="$(command -v python3 || command -v python || true)"
+
 if [[ -t 1 ]]; then
     C_RESET=$'\033[0m'; C_GREEN=$'\033[32m'
     C_YELLOW=$'\033[33m'; C_RED=$'\033[31m'; C_CYAN=$'\033[36m'
@@ -465,7 +467,8 @@ cmd_traffic() {
     require_install
     local file="/var/lib/litetunnel/traffic.json"
     [[ -f ${file} ]] || die "流量统计文件尚未生成，请检查 litetunnel-traffic.service。"
-    python3 -m json.tool "${file}"
+    [[ -n ${PYTHON_BIN} ]] || die "找不到 python3/python。"
+    "${PYTHON_BIN}" -m json.tool "${file}"
 }
 
 cmd_status() {

@@ -3,8 +3,11 @@
 > ⚠️ CentOS 7 已于 2024-06-30 结束支持（EOL），官方 yum 镜像已下线，内核 3.10 也没有内置
 > WireGuard。继续使用会面临安全更新缺失、软件源失效、内核模块兼容等问题。
 >
-> **最推荐的做法：在 VPS 控制台把系统重装为 Ubuntu 22.04/24.04 或 Debian 12，然后直接运行
-> README 里的一行安装命令。** 本页仅用于不能重装、必须继续使用 CentOS 7 的情况。
+> **最推荐的做法：在 VPS 控制台把系统重装为 Ubuntu 22.04/24.04、Debian 12，或 Rocky/Alma 9，
+> 然后直接运行 README 里的一行安装命令。**
+>
+> 新版 `install.sh` 已经会尝试自动处理 CentOS 7（切换 vault 源、装 EPEL/ELRepo、kmod/DKMS）。
+> 如果自动安装仍然失败，再按本页手动处理。
 
 ## 1. 切换到 CentOS Vault 源
 

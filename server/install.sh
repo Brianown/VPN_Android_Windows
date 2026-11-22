@@ -114,40 +114,178 @@ done
 
 # ---------------------------------------------------------------- 安装依赖
 
-if [[ ${SKIP_DEPS} == "1" ]]; then
-    info "SKIP_DEPS=1，跳过系统软件包安装；将检查所需命令是否存在。"
-else
-    command -v apt-get >/dev/null 2>&1 || die \
-        "当前系统没有 apt-get。本脚本的自动安装只支持 Debian/Ubuntu；
-     CentOS 7 / RHEL 请先按 docs/centos7.md 手动安装依赖，然后执行：
-       sudo SKIP_DEPS=1 bash /opt/VPN_Android_Windows-main/server/install.sh
-     推荐直接重装为 Ubuntu 22.04/24.04 或 Debian 12，再运行一键命令。"
-
-    info "更新软件源并安装依赖（wireguard-tools / qrencode / iptables / python3）……"
-    export DEBIAN_FRONTEND=noninteractive
-    apt-get update -qq
-    apt-get install -y -qq --no-install-recommends \
-        wireguard-tools qrencode iptables iproute2 curl ca-certificates python3 >/dev/null
-    ok "依赖安装完成"
-fi
-
-for required in wg ip iptables python3 curl systemctl; do
-    command -v "${required}" >/dev/null 2>&1 || die "缺少命令 ${required}，请先安装依赖（CentOS 7 参考 docs/centos7.md）。"
-done
-
-modprobe wireguard 2>/dev/null || true
-if ! ip link add litetunnel-test type wireguard 2>/dev/null; then
+detect_pm() {
     if command -v apt-get >/dev/null 2>&1; then
-        info "当前内核没有内置 WireGuard，尝试安装 DKMS 模块（旧内核需要）……"
-        apt-get install -y -qq --no-install-recommends \
-            "linux-headers-$(uname -r)" wireguard-dkms >/dev/null 2>&1 || true
+        PM=apt
+    elif command -v dnf >/dev/null 2>&1; then
+        PM=dnf
+    elif command -v yum >/dev/null 2>&1; then
+        PM=yum
+    elif command -v zypper >/dev/null 2>&1; then
+        PM=zypper
+    elif command -v pacman >/dev/null 2>&1; then
+        PM=pacman
+    else
+        PM=unknown
+    fi
+}
+
+fix_centos7_repos() {
+    [[ ${ID:-} == "centos" && ${VERSION_ID:-} == 7* ]] || return 0
+    [[ -f /etc/yum.repos.d/CentOS-Vault.repo ]] && return 0
+
+    info "CentOS 7 已 EOL，切换 yum 源到 vault.centos.org ……"
+    mkdir -p /root/litetunnel-yum-backup
+    local repo
+    for repo in /etc/yum.repos.d/CentOS-*.repo; do
+        [[ -e ${repo} ]] || continue
+        mv "${repo}" /root/litetunnel-yum-backup/ 2>/dev/null || true
+    done
+    cat > /etc/yum.repos.d/CentOS-Vault.repo <<'EOF'
+[base]
+name=CentOS-7.9.2009 - Base
+baseurl=http://vault.centos.org/7.9.2009/os/$basearch/
+gpgcheck=1
+gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-CentOS-7
+enabled=1
+
+[updates]
+name=CentOS-7.9.2009 - Updates
+baseurl=http://vault.centos.org/7.9.2009/updates/$basearch/
+gpgcheck=1
+gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-CentOS-7
+enabled=1
+
+[extras]
+name=CentOS-7.9.2009 - Extras
+baseurl=http://vault.centos.org/7.9.2009/extras/$basearch/
+gpgcheck=1
+gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-CentOS-7
+enabled=1
+EOF
+    yum clean all >/dev/null 2>&1 || true
+    yum makecache >/dev/null 2>&1 || warn "CentOS 7 vault 源 makecache 失败，后续安装可能失败。"
+}
+
+install_epel7() {
+    yum install -y epel-release >/dev/null 2>&1 && return 0
+    local epel_url
+    epel_url="https://archives.fedoraproject.org/pub/archive/epel/7/x86_64/Packages/e/epel-release-7-14.noarch.rpm"
+    rpm -Uvh --replacepkgs "${epel_url}" >/dev/null 2>&1 || \
+        warn "EPEL 7 安装失败，qrencode 等包可能无法安装。"
+}
+
+install_elrepo() {
+    rpm -q elrepo-release >/dev/null 2>&1 && return 0
+    local el_major url
+    el_major="$(rpm -E '%{rhel}' 2>/dev/null || true)"
+    [[ ${el_major} =~ ^[0-9]+$ ]] || el_major="${VERSION_ID%%.*}"
+    url="https://www.elrepo.org/elrepo-release-${el_major}.el${el_major}.elrepo.noarch.rpm"
+    "${PKG}" install -y "${url}" >/dev/null 2>&1 || \
+        warn "ELRepo 安装失败；如果内核没有 WireGuard 模块，需要手动安装 kmod-wireguard。"
+}
+
+install_dependencies() {
+    detect_pm
+    if [[ ${PM} == "unknown" ]]; then
+        die "未识别的包管理器。支持 Debian/Ubuntu(apt)、RHEL/CentOS/Rocky/Alma/Fedora(dnf/yum)、
+     openSUSE(zypper)、Arch/Manjaro(pacman)；请手动安装依赖后使用 SKIP_DEPS=1。"
+    fi
+    PKG="${PM}"
+    info "检测到包管理器：${PM}"
+
+    case "${PM}" in
+        apt)
+            export DEBIAN_FRONTEND=noninteractive
+            apt-get update -qq
+            apt-get install -y -qq --no-install-recommends \
+                wireguard-tools iptables iproute2 python3 curl ca-certificates >/dev/null
+            apt-get install -y -qq --no-install-recommends qrencode >/dev/null 2>&1 || \
+                warn "qrencode 未安装，客户端二维码将不可用。"
+            ;;
+        dnf)
+            if [[ ${ID:-} != "fedora" ]]; then
+                "${PKG}" install -y epel-release >/dev/null 2>&1 || true
+                install_elrepo
+            fi
+            "${PKG}" install -y wireguard-tools iptables iproute python3 curl ca-certificates >/dev/null
+            "${PKG}" install -y qrencode >/dev/null 2>&1 || warn "qrencode 未安装，客户端二维码将不可用。"
+            if [[ ${ID:-} != "fedora" ]]; then
+                "${PKG}" --enablerepo=elrepo install -y kmod-wireguard >/dev/null 2>&1 || true
+            fi
+            ;;
+        yum)
+            fix_centos7_repos
+            install_epel7
+            install_elrepo
+            yum install -y wireguard-tools iptables iproute python3 curl ca-certificates >/dev/null
+            yum install -y qrencode >/dev/null 2>&1 || warn "qrencode 未安装，客户端二维码将不可用。"
+            yum --enablerepo=elrepo install -y kmod-wireguard >/dev/null 2>&1 || true
+            ;;
+        zypper)
+            zypper --non-interactive refresh >/dev/null 2>&1 || true
+            zypper --non-interactive install wireguard-tools qrencode iptables iproute2 python3 curl ca-certificates >/dev/null
+            ;;
+        pacman)
+            pacman -Sy --noconfirm --needed \
+                wireguard-tools qrencode iptables-nft iproute2 python curl ca-certificates >/dev/null
+            ;;
+    esac
+    ok "依赖安装完成"
+}
+
+ensure_wireguard_module() {
+    local allow_install="$1"
+    modprobe wireguard 2>/dev/null || true
+    if ip link add litetunnel-test type wireguard 2>/dev/null; then
+        ip link del litetunnel-test 2>/dev/null || true
+        return 0
+    fi
+
+    if [[ ${allow_install} == "1" ]]; then
+        case "${PM}" in
+            apt)
+                info "当前内核没有内置 WireGuard，尝试安装 DKMS 模块……"
+                apt-get install -y -qq --no-install-recommends \
+                    "linux-headers-$(uname -r)" wireguard-dkms >/dev/null 2>&1 || true
+                ;;
+            dnf|yum)
+                if [[ ${ID:-} != "fedora" ]]; then
+                    info "尝试安装 WireGuard DKMS 模块（需要对应内核头文件）……"
+                    "${PKG}" install -y dkms gcc make \
+                        "kernel-devel-$(uname -r)" "kernel-headers-$(uname -r)" >/dev/null 2>&1 || true
+                    "${PKG}" install -y wireguard-dkms >/dev/null 2>&1 || true
+                fi
+                ;;
+            zypper)
+                zypper --non-interactive install wireguard-kmp-default >/dev/null 2>&1 || true
+                ;;
+        esac
         modprobe wireguard 2>/dev/null || true
     fi
+
     if ! ip link add litetunnel-test type wireguard 2>/dev/null; then
-        die "当前内核不支持 WireGuard。CentOS 7 请按 docs/centos7.md 安装 kmod-wireguard/wireguard-dkms，或重装 Ubuntu/Debian。"
+        die "当前内核没有可用的 WireGuard 模块。
+     CentOS 7 / RHEL 请参考 docs/centos7.md 安装 kmod-wireguard 或 wireguard-dkms；
+     其它系统请确认内核已启用 CONFIG_WIREGUARD，或安装 wireguard-dkms。"
     fi
+    ip link del litetunnel-test 2>/dev/null || true
+}
+
+if [[ ${SKIP_DEPS} == "1" ]]; then
+    info "SKIP_DEPS=1，跳过系统软件包安装；将检查所需命令是否存在。"
+    detect_pm
+else
+    install_dependencies
 fi
-ip link del litetunnel-test 2>/dev/null || true
+
+PYTHON_BIN="$(command -v python3 || command -v python || true)"
+[[ -n ${PYTHON_BIN} ]] || die "找不到 python3/python，请先安装 Python 3。"
+for required in wg ip iptables curl systemctl; do
+    command -v "${required}" >/dev/null 2>&1 || die "缺少命令 ${required}，请先安装依赖。"
+done
+
+ensure_wireguard_module "$([[ ${SKIP_DEPS} == "1" ]] && echo 0 || echo 1)"
 
 # ---------------------------------------------------------------- 网络检测
 
@@ -194,7 +332,7 @@ detect_location() {
         "http://ip-api.com/json/${ENDPOINT}?fields=status,country,regionName,city&lang=zh-CN" \
         2>/dev/null || true)"
     [[ -n ${json} ]] || return 0
-    location="$(printf '%s' "${json}" | python3 -c '
+    location="$(printf '%s' "${json}" | "${PYTHON_BIN}" -c '
 import json, sys
 try:
     data = json.load(sys.stdin)
@@ -422,7 +560,7 @@ Wants=wg-quick@${WG_IF}.service
 
 [Service]
 Type=oneshot
-ExecStart=/usr/bin/python3 /usr/local/lib/litetunnel/traffic-stats.py --interface ${WG_IF} --config ${CONF} --state /var/lib/litetunnel/traffic.json --timezone ${STATS_TZ}
+ExecStart=${PYTHON_BIN} /usr/local/lib/litetunnel/traffic-stats.py --interface ${WG_IF} --config ${CONF} --state /var/lib/litetunnel/traffic.json --timezone ${STATS_TZ}
 EOF
 
     cat > /etc/systemd/system/litetunnel-traffic.timer <<EOF
@@ -447,7 +585,7 @@ Requires=wg-quick@${WG_IF}.service
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/python3 /usr/local/lib/litetunnel/traffic-api.py --bind ${WG_NET}.1 --port ${STATS_PORT} --state /var/lib/litetunnel/traffic.json --timezone ${STATS_TZ}
+ExecStart=${PYTHON_BIN} /usr/local/lib/litetunnel/traffic-api.py --bind ${WG_NET}.1 --port ${STATS_PORT} --state /var/lib/litetunnel/traffic.json --timezone ${STATS_TZ}
 Restart=on-failure
 RestartSec=3
 
@@ -494,7 +632,7 @@ After=network.target
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/python3 /usr/local/lib/litetunnel/latency-probe.py --bind 0.0.0.0 --port ${PROBE_PORT}
+ExecStart=${PYTHON_BIN} /usr/local/lib/litetunnel/latency-probe.py --bind 0.0.0.0 --port ${PROBE_PORT}
 Restart=on-failure
 RestartSec=3
 
@@ -504,7 +642,7 @@ EOF
 
     systemctl daemon-reload
     systemctl enable --now litetunnel-probe.service >/dev/null 2>&1 || true
-    if python3 -c "import socket; s = socket.create_connection(('127.0.0.1', ${PROBE_PORT}), 2); s.close()" 2>/dev/null; then
+    if "${PYTHON_BIN}" -c "import socket; s = socket.create_connection(('127.0.0.1', ${PROBE_PORT}), 2); s.close()" 2>/dev/null; then
         ok "延迟探测服务已启动：TCP ${PROBE_PORT}"
     else
         warn "延迟探测服务未能启动，客户端延迟将显示为 —。"
