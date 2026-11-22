@@ -26,8 +26,12 @@ if (-not $csc) {
 
 $icon = Join-Path $PSScriptRoot 'assets\litetunnel.ico'
 $manifest = Join-Path $PSScriptRoot 'app.manifest'
+$routeList = Join-Path $PSScriptRoot 'assets\non_china_ipv4.txt'
 if (-not (Test-Path $icon)) {
     throw "缺少图标文件：$icon"
+}
+if (-not (Test-Path $routeList)) {
+    throw "缺少智能分流列表：$routeList"
 }
 
 New-Item -ItemType Directory -Force -Path $OutputDir | Out-Null
@@ -43,6 +47,7 @@ $arguments = @(
     '/langversion:5',
     ('/win32icon:' + $icon),
     ('/win32manifest:' + $manifest),
+    ('/resource:' + $routeList + ',non_china_ipv4.txt'),
     ('/out:' + (Join-Path $OutputDir 'LiteTunnel.exe')),
     '/reference:System.dll',
     '/reference:System.Core.dll',

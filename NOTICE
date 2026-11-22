@@ -14,6 +14,8 @@ Third-party components:
   licensed under the Apache License 2.0.
 - ZXing ("Zebra Crossing") and zxing-android-embedded,
   licensed under the Apache License 2.0.
+- 智能分流使用的 IPv4 路由分类数据由 APNIC delegated-apnic-latest 生成，
+  仅用于区分中国/非中国公网 IP 段。
 - WireGuard for Windows, Copyright WireGuard LLC, licensed under GPL-2.0.
   It is not bundled with this project; the Windows client calls the
   separately installed official application.

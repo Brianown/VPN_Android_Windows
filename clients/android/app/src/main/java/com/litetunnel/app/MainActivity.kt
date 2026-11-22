@@ -40,6 +40,7 @@ class MainActivity : AppCompatActivity(), VpnController.Listener {
 
     private val profiles = mutableListOf<Profile>()
     private var pendingProfile: Profile? = null
+    private var routeMode = RouteMode.GLOBAL
 
     private val statsHandler = Handler(Looper.getMainLooper())
     private val statsRunnable = object : Runnable {
@@ -73,7 +74,7 @@ class MainActivity : AppCompatActivity(), VpnController.Listener {
         val profile = pendingProfile
         pendingProfile = null
         if (result.resultCode == RESULT_OK && profile != null) {
-            VpnController.connect(this, profile)
+            VpnController.connect(this, profile, routeMode)
         } else {
             toast("未获得 VPN 授权，无法连接")
         }
@@ -125,6 +126,10 @@ class MainActivity : AppCompatActivity(), VpnController.Listener {
 
         store = ProfileStore(this)
         profiles.addAll(store.load())
+        routeMode = RouteMode.from(
+            getSharedPreferences("settings", MODE_PRIVATE)
+                .getString("route_mode", null)
+        )
 
         adapter = ProfileAdapter(
             onClick = { toggleConnection(it) },
@@ -165,6 +170,10 @@ class MainActivity : AppCompatActivity(), VpnController.Listener {
             showAbout()
             return true
         }
+        if (item.itemId == R.id.action_route_mode) {
+            showRouteModeDialog()
+            return true
+        }
         return super.onOptionsItemSelected(item)
     }
 
@@ -184,7 +193,7 @@ class MainActivity : AppCompatActivity(), VpnController.Listener {
             pendingProfile = profile
             vpnPermissionLauncher.launch(intent)
         } else {
-            VpnController.connect(this, profile)
+            VpnController.connect(this, profile, routeMode)
         }
     }
 
@@ -218,9 +227,9 @@ class MainActivity : AppCompatActivity(), VpnController.Listener {
         )
         binding.statusTitle.text = if (up) "已连接" else "未连接"
         binding.statusSubtitle.text = when {
-            up && activeProfile != null -> "${activeProfile.name} · 已连接"
-            up -> "VPN 已连接"
-            else -> "点击下方节点即可连接"
+            up && activeProfile != null -> "${activeProfile.name} · 已连接 · ${routeMode.label}"
+            up -> "VPN 已连接 · ${routeMode.label}"
+            else -> "当前模式：${routeMode.label} · 点击下方节点连接"
         }
         if (!up) binding.trafficText.text = ""
 
@@ -464,6 +473,38 @@ class MainActivity : AppCompatActivity(), VpnController.Listener {
     }
 
     // ---------------- 关于 ----------------
+
+    private fun showRouteModeDialog() {
+        val labels = arrayOf(
+            "全局代理：全部流量走 VPN",
+            "智能分流：国外走 VPN，国内直连"
+        )
+        val checked = if (routeMode == RouteMode.GLOBAL) 0 else 1
+        MaterialAlertDialogBuilder(this)
+            .setTitle("路由模式")
+            .setSingleChoiceItems(labels, checked) { dialog, which ->
+                val selected = if (which == 0) RouteMode.GLOBAL else RouteMode.SMART
+                if (selected != routeMode) {
+                    routeMode = selected
+                    getSharedPreferences("settings", MODE_PRIVATE)
+                        .edit()
+                        .putString("route_mode", selected.key)
+                        .apply()
+                    val connected = VpnController.state == Tunnel.State.UP
+                    if (connected) {
+                        VpnController.disconnect(this)
+                    }
+                    refreshList()
+                    toast(
+                        if (connected) "已切换为${selected.label}，请重新连接"
+                        else "已切换为${selected.label}"
+                    )
+                }
+                dialog.dismiss()
+            }
+            .setNegativeButton("取消", null)
+            .show()
+    }
 
     private fun showAbout() {
         val version = try {

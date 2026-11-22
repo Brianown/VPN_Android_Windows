@@ -33,6 +33,7 @@ namespace LiteTunnel
         private Button deleteButton;
         private Button openFolderButton;
         private Button aboutButton;
+        private CheckBox smartModeCheck;
         private Label footerLabel;
         private LinkLabel installLink;
         private Timer refreshTimer;
@@ -40,6 +41,7 @@ namespace LiteTunnel
         private Timer latencyTimer;
         private bool monthlyFetching;
         private string monthlyStatsTunnel;
+        private bool runningSmartMode;
 
         private List<ProfileInfo> profiles = new List<ProfileInfo>();
         private bool busy;
@@ -162,6 +164,24 @@ namespace LiteTunnel
             panel.Controls.Add(openFolderButton);
             panel.Controls.Add(deleteButton);
             panel.Controls.Add(aboutButton);
+
+            smartModeCheck = new CheckBox();
+            smartModeCheck.Text = "智能分流（国内直连）";
+            smartModeCheck.AutoSize = true;
+            smartModeCheck.ForeColor = Ink;
+            smartModeCheck.Margin = new Padding(14, 6, 0, 0);
+            smartModeCheck.Checked = AppSettings.SmartMode;
+            smartModeCheck.CheckedChanged += delegate
+            {
+                AppSettings.SmartMode = smartModeCheck.Checked;
+                if (FindActiveTunnelName() != null)
+                {
+                    MessageBox.Show(this, "路由模式将在下次连接时生效。请断开后重新连接。",
+                        "路由模式", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                }
+                RefreshState();
+            };
+            panel.Controls.Add(smartModeCheck);
             return panel;
         }
 
@@ -355,7 +375,8 @@ namespace LiteTunnel
             if (selectedRunning)
             {
                 statusTitle.Text = "已连接";
-                statusSubtitle.Text = selected.DisplayName + " · " + selected.Endpoint;
+                statusSubtitle.Text = selected.DisplayName + " · " + selected.Endpoint
+                    + " · " + (runningSmartMode ? "智能分流" : "全局代理");
             }
             else if (running != null)
             {
@@ -366,7 +387,9 @@ namespace LiteTunnel
             {
                 statusTitle.Text = "未连接";
                 if (selected != null)
-                    statusSubtitle.Text = "已选择 " + selected.DisplayName + "，点击右侧按钮连接";
+                    statusSubtitle.Text = "已选择 " + selected.DisplayName
+                        + " · " + (AppSettings.SmartMode ? "智能分流" : "全局代理")
+                        + "，点击右侧按钮连接";
                 else
                     statusSubtitle.Text = profiles.Count == 0 ? "导入配置后即可连接" : "选择一个节点开始";
             }
@@ -388,6 +411,7 @@ namespace LiteTunnel
             else
             {
                 monthlyStatsTunnel = null;
+                runningSmartMode = false;
                 monthlyTimer.Stop();
                 monthlyLabel.Text = "本月流量：连接后获取";
             }
@@ -566,11 +590,18 @@ namespace LiteTunnel
 
         private void ConnectAsync(ProfileInfo profile, string activeTunnelName)
         {
+            runningSmartMode = AppSettings.SmartMode;
             RunAsync("正在连接……", delegate
             {
                 if (activeTunnelName != null)
                     WireGuardManager.StopTunnel(activeTunnelName);
-                WireGuardManager.StartTunnel(profile);
+                string configPath = profile.FilePath;
+                if (AppSettings.SmartMode)
+                {
+                    string original = File.ReadAllText(profile.FilePath, Encoding.UTF8);
+                    configPath = SmartRoute.BuildSmartConfig(profile, original);
+                }
+                WireGuardManager.StartTunnel(configPath, profile.TunnelName);
             });
         }
 

@@ -33,11 +33,16 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="src\AssemblyInfo.cs" />
+    <Compile Include="src\AppSettings.cs" />
     <Compile Include="src\MainForm.cs" />
     <Compile Include="src\Program.cs" />
     <Compile Include="src\ProfileStore.cs" />
+    <Compile Include="src\SmartRoute.cs" />
     <Compile Include="src\TrafficStatsClient.cs" />
     <Compile Include="src\WireGuardManager.cs" />
+    <EmbeddedResource Include="assets\non_china_ipv4.txt">
+      <LogicalName>non_china_ipv4.txt</LogicalName>
+    </EmbeddedResource>
     <None Include="app.manifest" />
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />

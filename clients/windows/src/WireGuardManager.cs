@@ -115,16 +115,21 @@ namespace LiteTunnel
 
         public static void StartTunnel(ProfileInfo profile)
         {
+            StartTunnel(profile.FilePath, profile.TunnelName);
+        }
+
+        public static void StartTunnel(string configPath, string tunnelName)
+        {
             string exe = FindWireGuardExe();
             if (exe == null)
                 throw new InvalidOperationException("未检测到 WireGuard for Windows，请先安装。");
 
             string output;
-            int code = Run(exe, "/installtunnelservice \"" + profile.FilePath + "\"", 20000, out output);
+            int code = Run(exe, "/installtunnelservice \"" + configPath + "\"", 20000, out output);
             if (code != 0)
                 throw new Exception("创建 WireGuard 隧道失败（退出码 " + code + "）。\r\n" + output);
 
-            if (!WaitForService(profile.TunnelName, true, 12000))
+            if (!WaitForService(tunnelName, true, 12000))
                 throw new Exception("WireGuard 隧道服务未能在 12 秒内启动，请检查配置或 Windows 事件查看器。");
         }
 

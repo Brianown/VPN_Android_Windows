@@ -53,14 +53,20 @@ object VpnController {
 
     /**
      * 连接指定节点。调用前必须已经通过 [android.net.VpnService.prepare] 获得 VPN 授权。
+     * routeMode 为 SMART 时，只把非中国 IPv4 路由进 VPN。
      */
-    fun connect(context: Context, profile: Profile) {
+    fun connect(context: Context, profile: Profile, routeMode: RouteMode = RouteMode.GLOBAL) {
         if (state == Tunnel.State.UP && activeProfileId == profile.id) return
         val appContext = context.applicationContext
         executor.execute {
             try {
+                val configText = if (routeMode == RouteMode.SMART) {
+                    SmartRoute.build(appContext, profile.config)
+                } else {
+                    profile.config
+                }
                 val config = Config.parse(
-                    ByteArrayInputStream(profile.config.toByteArray(Charsets.UTF_8))
+                    ByteArrayInputStream(configText.toByteArray(Charsets.UTF_8))
                 )
                 val tunnel = ProfileTunnel(sanitizeTunnelName(profile.name)) { newState ->
                     if (newState == Tunnel.State.DOWN) {

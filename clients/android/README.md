@@ -34,6 +34,7 @@ app/build/outputs/apk/release/app-release.apk
 
 - 节点列表（名称、服务器 IP、位置/类型、连接状态、TCP 延迟）
 - 可保存多个不同服务器的配置，点击列表切换连接
+- 全局代理 / 智能分流：智能模式只让非中国 IPv4 走 VPN，国内直连
 - 服务端月度流量：从 VPN 内网 API 读取，与 PC 客户端显示同一份数据
 - 扫码导入二维码
 - 粘贴完整 WireGuard 配置
@@ -67,3 +68,5 @@ app/src/main/java/com/litetunnel/app/
 - 按 Home/返回通常不会断开 VPN；被系统强制停止或回收进程时会断开。
 - 月度流量依赖服务端生成的 `# StatsURL` 和 `# StatsToken` 注释；旧版配置需要重新添加客户端。
 - 月度流量 API 使用 HTTP，但只应该通过 WireGuard 隧道访问 VPN 内网地址。
+- 右上角菜单 → 路由模式，可切换“全局代理 / 智能分流”；切换后重新连接生效。
+- 智能分流基于 APNIC 中国 IP 段，按 IP 而非域名分流，CDN 场景可能有少量误判。
