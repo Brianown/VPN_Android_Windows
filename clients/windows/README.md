@@ -42,7 +42,7 @@ powershell -ExecutionPolicy Bypass -File .\build.ps1
 文件名就是 WireGuard 隧道名（ASCII），显示名称保存在配置顶部的 `# Name = ...` 注释里。
 
 > 点击窗口右上角关闭按钮不会退出，而是隐藏到托盘，VPN 保持连接。
-> 只有右键托盘图标 → “退出 LiteTunnel” 才会真正结束进程（并断开本程序创建的隧道）。
+> 只有点击工具栏的 **退出**，或右键托盘图标 → “退出 LiteTunnel”，才会真正结束进程（并断开本程序创建的隧道）。
 > 程序只识别并管理该目录下的 LiteTunnel 隧道，不会动官方 WireGuard 客户端创建的其它隧道。
 
 月度流量依赖服务端 v1.1.0+ 生成的 `# StatsURL` 和 `# StatsToken` 注释；

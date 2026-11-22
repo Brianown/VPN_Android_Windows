@@ -27,7 +27,7 @@ SERVER_TYPE="${SERVER_TYPE:-服务器}"
 PROBE_PORT="${PROBE_PORT:-8443}"
 CONF="/etc/wireguard/${WG_IF}.conf"
 
-PYTHON_BIN="$(command -v python3 || command -v python || true)"
+PYTHON_BIN="$(command -v python3 || command -v python3.6 || command -v python || true)"
 
 if [[ -t 1 ]]; then
     C_RESET=$'\033[0m'; C_GREEN=$'\033[32m'

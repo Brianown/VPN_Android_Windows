@@ -170,11 +170,17 @@ EOF
 }
 
 install_epel7() {
-    yum install -y epel-release >/dev/null 2>&1 && return 0
-    local epel_url
-    epel_url="https://archives.fedoraproject.org/pub/archive/epel/7/x86_64/Packages/e/epel-release-7-14.noarch.rpm"
-    rpm -Uvh --replacepkgs "${epel_url}" >/dev/null 2>&1 || \
-        warn "EPEL 7 安装失败，qrencode 等包可能无法安装。"
+    yum install -y epel-release >/dev/null 2>&1 || {
+        local epel_url
+        epel_url="https://archives.fedoraproject.org/pub/archive/epel/7/x86_64/Packages/e/epel-release-7-14.noarch.rpm"
+        rpm -Uvh --replacepkgs "${epel_url}" >/dev/null 2>&1 || \
+            warn "EPEL 7 安装失败，qrencode 等包可能无法安装。"
+    }
+    if [[ -f /etc/yum.repos.d/epel.repo ]]; then
+        sed -i -e 's|^metalink=|#metalink=|' \
+            -e 's|^#baseurl=.*epel/7|baseurl=https://archives.fedoraproject.org/pub/archive/epel/7/$basearch|' \
+            /etc/yum.repos.d/epel.repo 2>/dev/null || true
+    fi
 }
 
 install_elrepo() {

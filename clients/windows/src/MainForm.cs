@@ -234,6 +234,10 @@ namespace LiteTunnel
             panel.Controls.Add(deleteButton);
             panel.Controls.Add(aboutButton);
 
+            Button exitButton = MakeButton("退出", false);
+            exitButton.Click += delegate { ExitApplication(); };
+            panel.Controls.Add(exitButton);
+
             smartModeCheck = new CheckBox();
             smartModeCheck.Text = "智能分流（国内直连）";
             smartModeCheck.AutoSize = true;
