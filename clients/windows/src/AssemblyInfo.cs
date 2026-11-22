@@ -1,0 +1,8 @@
+﻿using System.Reflection;
+
+[assembly: AssemblyTitle("LiteTunnel")]
+[assembly: AssemblyDescription("轻隧 LiteTunnel - 基于 WireGuard 的 Windows VPN 客户端")]
+[assembly: AssemblyProduct("轻隧 LiteTunnel")]
+[assembly: AssemblyCompany("LiteTunnel")]
+[assembly: AssemblyVersion("1.0.0.0")]
+[assembly: AssemblyFileVersion("1.0.0.0")]

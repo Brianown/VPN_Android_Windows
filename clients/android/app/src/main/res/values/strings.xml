@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">轻隧</string>
+    <string name="app_subtitle">LiteTunnel · WireGuard</string>
+    <string name="add_node">添加节点</string>
+</resources>

@@ -1,0 +1,37 @@
+# Android 构建产物
+clients/android/.gradle/
+clients/android/build/
+clients/android/app/build/
+clients/android/local.properties
+clients/android/.idea/
+clients/android/captures/
+clients/android/*.apk
+clients/android/*.aab
+
+# Windows 构建产物
+clients/windows/dist/
+clients/windows/src/bin/
+clients/windows/src/obj/
+clients/windows/*.user
+clients/windows/*.suo
+clients/windows/.vs/
+
+# 本地测试 / 临时文件
+_test/
+_test-prefs.xml
+_*.log
+*.tmp
+
+# 操作系统
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# 签名文件（千万不要提交）
+*.keystore
+*.jks
+keystore.properties
+
+# 打包产物
+release/
+dist/
