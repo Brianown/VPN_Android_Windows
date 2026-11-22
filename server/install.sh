@@ -287,6 +287,15 @@ install_userspace_wireguard() {
     fi
     [[ -c /dev/net/tun ]] || return 1
     command -v wireguard-go >/dev/null 2>&1 || return 1
+
+    # 强制 wg-quick 使用用户态实现；即使以后系统里出现了内核模块，
+    # 这次安装也保持一致，避免 wg-quick 行为不确定。
+    mkdir -p "/etc/systemd/system/wg-quick@${WG_IF}.service.d"
+    cat > "/etc/systemd/system/wg-quick@${WG_IF}.service.d/userspace.conf" <<EOF
+[Service]
+Environment=WG_QUICK_USERSPACE_IMPLEMENTATION=/usr/local/bin/wireguard-go
+EOF
+
     ok "已安装 wireguard-go 用户态实现（内核无模块时 wg-quick 会自动使用）"
     return 0
 }
