@@ -77,6 +77,15 @@
                 android:text="点击下方节点即可连接"
                 android:textColor="@color/muted"
                 android:textSize="13sp" />
+
+            <TextView
+                android:id="@+id/monthlyText"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="7dp"
+                android:text="本月流量：连接后获取"
+                android:textColor="@color/muted"
+                android:textSize="12sp" />
         </LinearLayout>
     </com.google.android.material.card.MaterialCardView>
 

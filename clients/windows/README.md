@@ -2,7 +2,7 @@
 
 基于 .NET Framework 4.8 的 WinForms 单文件客户端。隧道由官方开源的
 [WireGuard for Windows](https://www.wireguard.com/install/) 提供，本程序负责导入配置、
-创建/删除隧道服务、显示状态。
+创建/删除隧道服务、显示状态，并从服务端 VPN 内网 API 读取本月流量。
 
 ## 运行要求
 
@@ -28,6 +28,7 @@ powershell -ExecutionPolicy Bypass -File .\build.ps1
 2. 以管理员身份运行 `LiteTunnel.exe`；
 3. **导入配置** 选择服务端生成的 `.conf`，或 **粘贴配置**；
 4. 选中节点 → **连接**；
+5. 连接成功后状态卡会显示“本月流量：↓ … ↑ …（YYYY-MM）”，每 60 秒刷新一次。
 5. 再次点击 **断开连接**。
 
 配置保存在：

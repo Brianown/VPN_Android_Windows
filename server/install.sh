@@ -22,6 +22,8 @@
 #   WG_ENDPOINT=1.2.3.4       服务器公网 IP（默认自动探测，NAT 后面需手动指定）
 #   CLIENT_PREFIX=client      客户端名前缀
 #   WG_PRINT_CONFIGS=1        安装完成后打印所有客户端导入内容（含私钥；设为 0 关闭）
+#   STATS_PORT=8080           客户端查询月度流量的 API 端口（只监听 VPN 内网）
+#   STATS_TZ=Asia/Shanghai    月度流量清零使用的时区
 #
 set -Eeuo pipefail
 
@@ -33,6 +35,8 @@ WG_MTU="${WG_MTU:-1420}"
 WG_CLIENTS="${WG_CLIENTS:-3}"
 CLIENT_PREFIX="${CLIENT_PREFIX:-client}"
 WG_PRINT_CONFIGS="${WG_PRINT_CONFIGS:-1}"
+STATS_PORT="${STATS_PORT:-8080}"
+STATS_TZ="${STATS_TZ:-Asia/Shanghai}"
 
 STATE_DIR="/etc/wireguard"
 CONF="${STATE_DIR}/${WG_IF}.conf"
@@ -50,6 +54,13 @@ info() { printf '%s[LiteTunnel]%s %s\n' "$C_CYAN" "$C_RESET" "$*"; }
 ok()   { printf '%s[   OK   ]%s %s\n' "$C_GREEN" "$C_RESET" "$*"; }
 warn() { printf '%s[  WARN  ]%s %s\n' "$C_YELLOW" "$C_RESET" "$*" >&2; }
 die()  { printf '%s[ FAILED ]%s %s\n' "$C_RED" "$C_RESET" "$*" >&2; exit 1; }
+
+gen_token() {
+    local token
+    token="$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')"
+    [[ ${#token} -eq 32 ]] || die "生成 StatsToken 失败。"
+    printf '%s' "${token}"
+}
 
 trap 'die "脚本在第 ${LINENO} 行执行失败，已中止。请检查上面的错误信息。"' ERR
 
@@ -85,14 +96,16 @@ done
 [[ ${WG_CLIENTS} =~ ^[0-9]+$ ]] || die "WG_CLIENTS 必须是 1-200 的数字"
 (( 10#${WG_CLIENTS} >= 1 && 10#${WG_CLIENTS} <= 200 )) || die "WG_CLIENTS 必须是 1-200 的数字"
 [[ ${CLIENT_PREFIX} =~ ^[a-zA-Z0-9_-]{1,10}$ ]] || die "CLIENT_PREFIX 只能包含字母、数字、下划线、短横线，且不超过 10 个字符"
+[[ ${STATS_PORT} =~ ^[0-9]+$ ]] || die "STATS_PORT 必须是数字"
+(( 10#${STATS_PORT} >= 1 && 10#${STATS_PORT} <= 65535 )) || die "STATS_PORT 必须是 1-65535 的数字"
 
 # ---------------------------------------------------------------- 安装依赖
 
-info "更新软件源并安装依赖（wireguard-tools / qrencode / iptables）……"
+info "更新软件源并安装依赖（wireguard-tools / qrencode / iptables / python3）……"
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
 apt-get install -y -qq --no-install-recommends \
-    wireguard-tools qrencode iptables iproute2 curl ca-certificates >/dev/null
+    wireguard-tools qrencode iptables iproute2 curl ca-certificates python3 >/dev/null
 ok "依赖安装完成"
 
 modprobe wireguard 2>/dev/null || true
@@ -184,16 +197,18 @@ EOF
 add_client() {
     local name="$1"
     local ip="$2"
-    local private public psk
+    local private public psk token
 
     private="$(wg genkey)"
     public="$(printf '%s' "${private}" | wg pubkey)"
     psk="$(wg genpsk)"
+    token="$(gen_token)"
 
     cat >> "${CONF}" <<EOF
 
 [Peer]
 # litetunnel: name=${name}
+# litetunnel: token=${token}
 PublicKey = ${public}
 PresharedKey = ${psk}
 AllowedIPs = ${WG_NET}.${ip}/32
@@ -201,6 +216,8 @@ EOF
 
     cat > "${CLIENT_DIR}/${name}.conf" <<EOF
 # Name = ${name}
+# StatsURL = http://${WG_NET}.1:${STATS_PORT}/api/traffic
+# StatsToken = ${token}
 [Interface]
 PrivateKey = ${private}
 Address = ${WG_NET}.${ip}/24
@@ -246,13 +263,17 @@ ok "WireGuard 已启动并监听 UDP ${WG_PORT}"
 
 if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q "Status: active"; then
     ufw allow "${WG_PORT}/udp" >/dev/null 2>&1 || true
-    ok "已放行 UFW UDP ${WG_PORT}"
+    ufw allow from "${WG_NET}.0/24" to any port "${STATS_PORT}" proto tcp >/dev/null 2>&1 || true
+    ok "已放行 UFW UDP ${WG_PORT}，以及 VPN 内网 TCP ${STATS_PORT}"
 fi
 
 if command -v firewall-cmd >/dev/null 2>&1 && firewall-cmd --state >/dev/null 2>&1; then
     firewall-cmd --permanent --add-port="${WG_PORT}/udp" >/dev/null 2>&1 || true
+    firewall-cmd --permanent \
+        --add-rich-rule="rule family=\"ipv4\" source address=\"${WG_NET}.0/24\" port port=\"${STATS_PORT}\" protocol=\"tcp\" accept" \
+        >/dev/null 2>&1 || true
     firewall-cmd --reload >/dev/null 2>&1 || true
-    ok "已放行 firewalld UDP ${WG_PORT}"
+    ok "已放行 firewalld UDP ${WG_PORT}，以及 VPN 内网 TCP ${STATS_PORT}"
 fi
 
 # ---------------------------------------------------------------- 管理命令
@@ -265,13 +286,19 @@ WG_DNS="${WG_DNS}"
 WG_MTU=${WG_MTU}
 WG_ENDPOINT=${ENDPOINT}
 CLIENT_DIR=${CLIENT_DIR}
+STATS_PORT=${STATS_PORT}
+STATS_TZ=${STATS_TZ}
 EOF
 chmod 600 "${ENV_FILE}"
 
-MANAGE_SRC=""
+SCRIPT_DIR=""
 if [[ -n ${BASH_SOURCE[0]:-} && -f ${BASH_SOURCE[0]} ]]; then
-    candidate="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/manage.sh"
-    [[ -f ${candidate} ]] && MANAGE_SRC="${candidate}"
+    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+fi
+
+MANAGE_SRC=""
+if [[ -n ${SCRIPT_DIR} && -f ${SCRIPT_DIR}/manage.sh ]]; then
+    MANAGE_SRC="${SCRIPT_DIR}/manage.sh"
 fi
 if [[ -z ${MANAGE_SRC} && -n ${LITETUNNEL_RAW:-} ]]; then
     curl -fsSL "${LITETUNNEL_RAW%/}/server/manage.sh" -o /tmp/litetunnel-manage.sh
@@ -284,6 +311,98 @@ else
     warn "未找到 manage.sh，可手动使用仓库中的 server/manage.sh。"
 fi
 
+# ---------------------------------------------------------------- 月度流量统计
+
+STATS_SRC=""
+API_SRC=""
+if [[ -n ${SCRIPT_DIR} && -f ${SCRIPT_DIR}/traffic-stats.py ]]; then
+    STATS_SRC="${SCRIPT_DIR}/traffic-stats.py"
+fi
+if [[ -n ${SCRIPT_DIR} && -f ${SCRIPT_DIR}/traffic-api.py ]]; then
+    API_SRC="${SCRIPT_DIR}/traffic-api.py"
+fi
+if [[ -z ${STATS_SRC} && -n ${LITETUNNEL_RAW:-} ]]; then
+    curl -fsSL "${LITETUNNEL_RAW%/}/server/traffic-stats.py" -o /tmp/litetunnel-traffic-stats.py
+    STATS_SRC=/tmp/litetunnel-traffic-stats.py
+fi
+if [[ -z ${API_SRC} && -n ${LITETUNNEL_RAW:-} ]]; then
+    curl -fsSL "${LITETUNNEL_RAW%/}/server/traffic-api.py" -o /tmp/litetunnel-traffic-api.py
+    API_SRC=/tmp/litetunnel-traffic-api.py
+fi
+
+if [[ -n ${STATS_SRC} && -n ${API_SRC} ]]; then
+    install -d -m 755 /usr/local/lib/litetunnel
+    install -d -m 700 /var/lib/litetunnel
+    install -m 755 "${STATS_SRC}" /usr/local/lib/litetunnel/traffic-stats.py
+    install -m 755 "${API_SRC}" /usr/local/lib/litetunnel/traffic-api.py
+
+    cat > /etc/systemd/system/litetunnel-traffic.service <<EOF
+[Unit]
+Description=LiteTunnel monthly traffic collector
+After=wg-quick@${WG_IF}.service
+Wants=wg-quick@${WG_IF}.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /usr/local/lib/litetunnel/traffic-stats.py --interface ${WG_IF} --config ${CONF} --state /var/lib/litetunnel/traffic.json --timezone ${STATS_TZ}
+EOF
+
+    cat > /etc/systemd/system/litetunnel-traffic.timer <<EOF
+[Unit]
+Description=Collect LiteTunnel traffic every minute
+
+[Timer]
+OnBootSec=30s
+OnUnitActiveSec=60s
+AccuracySec=5s
+Unit=litetunnel-traffic.service
+
+[Install]
+WantedBy=timers.target
+EOF
+
+    cat > /etc/systemd/system/litetunnel-api.service <<EOF
+[Unit]
+Description=LiteTunnel traffic API (VPN interface only)
+After=wg-quick@${WG_IF}.service
+Requires=wg-quick@${WG_IF}.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /usr/local/lib/litetunnel/traffic-api.py --bind ${WG_NET}.1 --port ${STATS_PORT} --state /var/lib/litetunnel/traffic.json --timezone ${STATS_TZ}
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+    systemctl daemon-reload
+    systemctl enable litetunnel-api.service litetunnel-traffic.timer >/dev/null 2>&1 || true
+    systemctl start litetunnel-traffic.service >/dev/null 2>&1 || true
+    systemctl start litetunnel-api.service >/dev/null 2>&1 || true
+    systemctl start litetunnel-traffic.timer >/dev/null 2>&1 || true
+
+    sleep 1
+    if systemctl is-active --quiet litetunnel-api.service; then
+        ok "月度流量统计 API 已启动：http://${WG_NET}.1:${STATS_PORT}/api/traffic（仅 VPN 内网）"
+    else
+        warn "流量统计 API 未能启动，请查看：journalctl -u litetunnel-api.service -n 40"
+    fi
+
+    first_conf="${CLIENT_DIR}/${CLIENT_NAMES[0]}.conf"
+    first_token="$(sed -n 's/^# StatsToken = //p' "${first_conf}" | head -n 1)"
+    if [[ -n ${first_token} ]]; then
+        if curl -fsS --max-time 3 "http://${WG_NET}.1:${STATS_PORT}/api/traffic?token=${first_token}" >/dev/null 2>&1; then
+            ok "流量统计 API 自检通过"
+        else
+            warn "流量统计 API 暂时不可用；客户端连接后会自动重试。"
+        fi
+    fi
+else
+    warn "未找到 traffic-stats.py / traffic-api.py，客户端将无法显示服务端月度流量。"
+fi
+
 # ---------------------------------------------------------------- 完成信息
 
 printf '\n%s%s 安装完成！%s\n\n' "${C_GREEN}" "${C_BOLD}" "${C_RESET}"
@@ -294,6 +413,8 @@ WireGuard 端口 : ${WG_PORT}/udp
 虚拟网段       : ${WG_NET}.0/24
 服务端配置     : ${CONF}
 客户端配置目录 : ${CLIENT_DIR}
+月度流量 API   : http://${WG_NET}.1:${STATS_PORT}/api/traffic（仅 VPN 内网）
+流量统计周期   : 每月最后一天结束（次月 1 日 00:00，${STATS_TZ}）清零
 EOF
 
 printf '\n已生成客户端：\n'

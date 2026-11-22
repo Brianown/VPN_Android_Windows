@@ -22,6 +22,7 @@
 - **服务端一键安装**：Debian / Ubuntu，自动安装依赖、开启转发、配置 NAT、生成密钥和客户端、生成二维码、注册 systemd 服务。
 - **安卓客户端**：Kotlin + Material 3，支持扫码 / 粘贴 / 导入 `.conf`，多节点管理、连接状态、实时流量统计。
 - **Windows 客户端**：C# WinForms，单文件 exe，导入 / 粘贴配置，一键连接 / 断开，自动检测官方 WireGuard for Windows。
+- **服务端月度流量统计**：服务端按客户端累计本月接收/发送流量，每月最后一天结束（次月 1 日 00:00）清零；手机和 PC 从同一个 VPN 内网 API 读取，数字一致。
 - **标准协议**：没有自造加密协议，服务端就是标准 WireGuard，可以用官方客户端、路由器或其他兼容工具连接。
 - **开源**：Apache-2.0，代码量小，便于学习和二次开发。
 
@@ -53,7 +54,9 @@ Curve25519 + ChaCha20-Poly1305；每个客户端还额外配置了 `PresharedKey
 VPN_Android_Windows/
 ├── server/
 │   ├── install.sh              # 服务端一键安装
-│   └── manage.sh               # 客户端管理（安装后为 /usr/local/bin/litetunnel）
+│   ├── manage.sh               # 客户端管理（安装后为 /usr/local/bin/litetunnel）
+│   ├── traffic-stats.py        # 月度流量采集器（systemd timer 每分钟运行）
+│   └── traffic-api.py          # 仅监听 VPN 内网的月度流量 API
 ├── clients/
 │   ├── android/                # Android Studio / Gradle 工程
 │   └── windows/                # .NET Framework 4.8 WinForms 工程与构建脚本
@@ -161,6 +164,7 @@ sudo litetunnel qr phone         # 在终端里直接显示二维码
 sudo litetunnel config phone     # 打印配置
 sudo litetunnel del phone        # 删除并吊销
 sudo litetunnel status           # 查看服务 / 端口状态
+sudo litetunnel traffic          # 查看服务端月度流量 JSON
 ```
 
 客户端名称只能使用字母、数字、下划线、短横线，最长 15 个字符。
@@ -193,7 +197,7 @@ PresharedKey、Endpoint），不会生成或显示客户端私钥。
 
 #### Android
 
-- 从 GitHub Releases 下载 `LiteTunnel-Android-v1.0.0.apk`（或按下面“构建”一节自行编译）；
+- 从 GitHub Releases 下载 `LiteTunnel-Android-v1.1.0.apk`（或按下面“构建”一节自行编译）；
 - 允许“安装未知来源应用”后安装；
 - 打开 App，点右下角 **+**：
   - **扫码**：扫描服务端生成的 `client1.png`；
@@ -224,6 +228,52 @@ PresharedKey、Endpoint），不会生成或显示客户端私钥。
 
 扫码或导入 `.conf` 即可，无需使用本项目客户端。
 
+## 月度流量统计
+
+服务端安装时会同时部署：
+
+- `litetunnel-traffic.timer`：每 60 秒读取一次 `wg show` 的累计计数器，按客户端累加到当前自然月；
+- `litetunnel-api.service`：只监听 VPN 内网地址 `10.66.66.1:8080`，通过每个客户端配置里的随机 `StatsToken` 返回该客户端自己的统计；
+- 状态文件：`/var/lib/litetunnel/traffic.json`（root 600 权限）。
+
+**清零时间**：每月最后一天结束、次月 1 日 00:00（默认 `Asia/Shanghai`）清零重新累计。
+第一次安装或第一次连接时以当前 `wg` 计数器为基线，不会把安装前的历史流量算进去。
+
+客户端配置会自动包含：
+
+```ini
+# StatsURL = http://10.66.66.1:8080/api/traffic
+# StatsToken = <该客户端专属随机 token>
+```
+
+连接后，Android / Windows 客户端会每 60 秒查询一次，并显示：
+
+```text
+本月流量：↓ 1.2 GB   ↑ 300.0 MB（2026-11）
+```
+
+> `↓` 是服务器发给客户端的数据（客户端下载），`↑` 是服务器收到的数据（客户端上传）。
+> API 原始字段 `rx` 表示服务器接收（上传），`tx` 表示服务器发送（下载）。
+
+- 同一份配置导入手机和电脑，两者显示同一客户端的同一份数据；
+- 不同客户端（client1/client2）有独立 token，各自统计，互不混淆；
+- 客户端未连接时显示“连接后获取”，不会在公网直接查询 API。
+
+服务端排查命令：
+
+```bash
+sudo litetunnel traffic
+systemctl status litetunnel-api.service litetunnel-traffic.timer
+journalctl -u litetunnel-api.service -n 50 --no-pager
+journalctl -u litetunnel-traffic.service -n 50 --no-pager
+```
+
+> 如果使用 UFW/firewalld 之外的防火墙，需要放行 **VPN 内网来源** 到 TCP `8080`；
+> API 不应暴露到公网。
+>
+> 旧版本生成的客户端配置没有 `StatsURL/StatsToken`，重新执行 `sudo litetunnel add 名称`
+> 生成新客户端，或重新安装即可。
+
 ## 服务端参数
 
 安装时可通过环境变量覆盖默认值：
@@ -243,6 +293,8 @@ sudo WG_PORT=443 WG_CLIENTS=5 bash /opt/VPN_Android_Windows-main/server/install.
 | `CLIENT_PREFIX` | `client` | 初始客户端名前缀 |
 | `WG_IF` | `wg0` | 服务端网卡名 |
 | `WG_PRINT_CONFIGS` | `1` | 安装完成后打印所有客户端配置；`0` 关闭 |
+| `STATS_PORT` | `8080` | 月度流量 API 端口（只监听 VPN 内网） |
+| `STATS_TZ` | `Asia/Shanghai` | 月度流量清零时区 |
 
 修改端口示例：
 
@@ -348,6 +400,33 @@ WireGuard 使用 UDP，特征明显，在部分网络会被限速或阻断。可
 
 本项目自带客户端只支持 WireGuard；Xray 方案可直接使用开源的 v2rayNG / v2rayN 导入分享链接。
 
+### 客户端显示“本月流量：暂时无法获取”
+
+按顺序检查：
+
+```bash
+sudo litetunnel traffic
+systemctl status litetunnel-api.service litetunnel-traffic.timer
+journalctl -u litetunnel-api.service -n 50 --no-pager
+```
+
+- 必须**先连接 VPN**，再查询 `http://10.66.66.1:8080`；公网访问不到是正常的；
+- 服务器防火墙要允许 VPN 内网 `10.66.66.0/24` 访问 TCP `8080`；
+- 如果 `traffic.json` 不存在，先手动触发一次采集：`sudo systemctl start litetunnel-traffic.service`；
+- 旧版客户端配置没有 `StatsURL/StatsToken`，用 `sudo litetunnel add 新名称` 重新生成配置。
+
+### 两个客户端的月度流量不一样
+
+统计是按客户端配置（WireGuard 公钥 + `StatsToken`）区分的：
+
+- 同一份 `.conf` 导入手机和电脑 → 显示同一份数据；
+- 不同 `.conf`（client1 / client2）→ 各自统计，这是正常的。
+
+### 流量什么时候清零？
+
+默认在每月最后一天结束、次月 1 日 00:00（`Asia/Shanghai`）清零。
+采集器每分钟运行一次，所以清零后最多约 1 分钟显示旧值。
+
 ### 卸载服务端
 
 ```bash
@@ -382,6 +461,7 @@ sudo WG_PORT=443 WG_ENDPOINT=你的公网IP bash /opt/VPN_Android_Windows-main/s
   ```
 
 - 本项目不包含任何流量日志、账号系统或遥测。
+- 月度流量 `StatsToken` 只能读取该客户端自己的流量数字，不能操作 VPN；API 只监听 VPN 内网，仍然建议不要把它转发到公网。
 - 加密能保护“内容”，但不能让 VPN 服务器看不到你的目的地；详见 [docs/privacy.md](docs/privacy.md) 和 [docs/china.md](docs/china.md)。
 
 ## 发布到 GitHub
@@ -393,18 +473,19 @@ https://github.com/Brianown/VPN_Android_Windows.git
 ```
 
 ```bash
+# HTTPS（需要 GitHub 个人访问令牌）
 git remote add origin https://github.com/Brianown/VPN_Android_Windows.git
-# 如果已经添加过 origin：
-# git remote set-url origin https://github.com/Brianown/VPN_Android_Windows.git
+# 或 SSH（需要把公钥加到 GitHub，或仓库的 Deploy key 并勾选 write access）
+# git remote add origin git@github.com:Brianown/VPN_Android_Windows.git
 git push -u origin main
 ```
 
 推送后：
 
 1. 在 Actions 中等待构建完成，下载 Artifact；
-2. 创建 Release（例如 `v1.0.0`），上传 APK 和 EXE。
+2. 创建 Release（例如 `v1.1.0`），上传 APK 和 EXE。
 
-> 随附的 `litetunnel-v1.0.0.zip` 中包含预编译的 APK / EXE（位于 `release/`）。
+> 随附的 `litetunnel-v1.1.0.zip` 中包含预编译的 APK / EXE（位于 `release/`）。
 > `release/` 已被 `.gitignore` 忽略，发布时建议把这两个文件上传到 GitHub Release，
 > 而不是直接提交进 Git 仓库。
 

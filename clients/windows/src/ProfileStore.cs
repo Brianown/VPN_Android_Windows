@@ -24,6 +24,10 @@ namespace LiteTunnel
             new Regex(@"^#\s*Name\s*[:=]\s*(.+)$", RegexOptions.Multiline);
         private static readonly Regex EndpointRegex =
             new Regex(@"^\s*Endpoint\s*=\s*(\S+)", RegexOptions.Multiline);
+        private static readonly Regex StatsUrlRegex =
+            new Regex(@"^#\s*StatsURL\s*=\s*(\S+)", RegexOptions.Multiline);
+        private static readonly Regex StatsTokenRegex =
+            new Regex(@"^#\s*StatsToken\s*=\s*(\S+)", RegexOptions.Multiline);
         private static readonly Regex InterfaceRegex =
             new Regex(@"^\s*\[Interface\]\s*$", RegexOptions.Multiline);
         private static readonly Regex PeerRegex =
@@ -216,6 +220,22 @@ namespace LiteTunnel
             if (string.IsNullOrEmpty(text))
                 return null;
             Match match = EndpointRegex.Match(text);
+            return match.Success ? match.Groups[1].Value.Trim() : null;
+        }
+
+        public static string GetStatsUrl(string text)
+        {
+            if (string.IsNullOrEmpty(text))
+                return null;
+            Match match = StatsUrlRegex.Match(text);
+            return match.Success ? match.Groups[1].Value.Trim() : null;
+        }
+
+        public static string GetStatsToken(string text)
+        {
+            if (string.IsNullOrEmpty(text))
+                return null;
+            Match match = StatsTokenRegex.Match(text);
             return match.Success ? match.Groups[1].Value.Trim() : null;
         }
 

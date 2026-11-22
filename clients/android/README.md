@@ -38,6 +38,7 @@ app/build/outputs/apk/release/app-release.apk
 - 从文件导入 `.conf`
 - 长按节点：复制配置 / 编辑 / 删除
 - 连接状态、连接时长、实时接收/发送流量
+- 服务端月度流量：从 VPN 内网 API 读取，与 PC 客户端显示同一份数据
 - 配置保存在应用私有 SharedPreferences，关闭系统备份
 
 ## 代码结构
@@ -63,3 +64,5 @@ app/src/main/java/com/litetunnel/app/
 - 同一时刻只保留一条隧道；切换节点会断开旧节点。
 - 应用没有实现开机自连、分应用代理、Always-on 等高级功能，可按需扩展。
 - 按 Home/返回通常不会断开 VPN；被系统强制停止或回收进程时会断开。
+- 月度流量依赖服务端生成的 `# StatsURL` 和 `# StatsToken` 注释；旧版配置需要重新添加客户端。
+- 月度流量 API 使用 HTTP，但只应该通过 WireGuard 隧道访问 VPN 内网地址。

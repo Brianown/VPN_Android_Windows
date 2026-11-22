@@ -28,6 +28,7 @@ import com.wireguard.android.backend.Tunnel
 import com.wireguard.config.Config
 import java.io.ByteArrayInputStream
 import java.util.UUID
+import java.util.concurrent.Executors
 
 class MainActivity : AppCompatActivity(), VpnController.Listener {
 
@@ -43,6 +44,15 @@ class MainActivity : AppCompatActivity(), VpnController.Listener {
         override fun run() {
             updateTraffic()
             statsHandler.postDelayed(this, 1000L)
+        }
+    }
+
+    private val monthlyHandler = Handler(Looper.getMainLooper())
+    private val monthlyExecutor = Executors.newSingleThreadExecutor()
+    private val monthlyRunnable = object : Runnable {
+        override fun run() {
+            refreshMonthlyStats()
+            monthlyHandler.postDelayed(this, 60_000L)
         }
     }
 
@@ -119,11 +129,15 @@ class MainActivity : AppCompatActivity(), VpnController.Listener {
     override fun onStart() {
         super.onStart()
         VpnController.addListener(this)
+        if (VpnController.state == Tunnel.State.UP) {
+            startMonthlyStats()
+        }
     }
 
     override fun onStop() {
         VpnController.removeListener(this)
         statsHandler.removeCallbacks(statsRunnable)
+        monthlyHandler.removeCallbacks(monthlyRunnable)
         super.onStop()
     }
 
@@ -165,9 +179,11 @@ class MainActivity : AppCompatActivity(), VpnController.Listener {
         if (state == Tunnel.State.UP) {
             statsHandler.removeCallbacks(statsRunnable)
             statsHandler.post(statsRunnable)
+            startMonthlyStats()
         } else {
             statsHandler.removeCallbacks(statsRunnable)
             binding.trafficText.text = ""
+            stopMonthlyStats()
         }
     }
 
@@ -209,6 +225,49 @@ class MainActivity : AppCompatActivity(), VpnController.Listener {
             ""
         }
         binding.trafficText.text = "$elapsed  ↓${formatBytes(rx)}  ↑${formatBytes(tx)}"
+    }
+
+    // ---------------- 服务端月度流量 ----------------
+
+    private fun startMonthlyStats() {
+        monthlyHandler.removeCallbacks(monthlyRunnable)
+        binding.monthlyText.text = "本月流量：获取中…"
+        monthlyHandler.postDelayed(monthlyRunnable, 1500L)
+    }
+
+    private fun stopMonthlyStats() {
+        monthlyHandler.removeCallbacks(monthlyRunnable)
+        binding.monthlyText.text = "本月流量：连接后获取"
+    }
+
+    private fun refreshMonthlyStats() {
+        if (VpnController.state != Tunnel.State.UP) return
+        val profile = profiles.firstOrNull { it.id == VpnController.activeProfileId } ?: return
+        if (!TrafficStatsClient.hasStatsConfig(profile)) {
+            binding.monthlyText.text = "本月流量：服务端未配置统计"
+            return
+        }
+        monthlyExecutor.execute {
+            val data = TrafficStatsClient.fetch(profile)
+            runOnUiThread {
+                if (isFinishing || isDestroyed) return@runOnUiThread
+                if (VpnController.state != Tunnel.State.UP ||
+                    VpnController.activeProfileId != profile.id
+                ) {
+                    return@runOnUiThread
+                }
+                if (data == null) {
+                    if (binding.monthlyText.text == "本月流量：获取中…") {
+                        binding.monthlyText.text = "本月流量：暂时无法获取"
+                    }
+                } else {
+                    val period = if (data.period.isBlank()) "" else "（${data.period}）"
+                    // 服务端 rx = 服务器收到（客户端上传），tx = 服务器发出（客户端下载）
+                    binding.monthlyText.text =
+                        "本月流量：↓${formatBytes(data.tx)}  ↑${formatBytes(data.rx)}$period"
+                }
+            }
+        }
     }
 
     // ---------------- 节点管理 ----------------
@@ -363,9 +422,9 @@ class MainActivity : AppCompatActivity(), VpnController.Listener {
 
     private fun showAbout() {
         val version = try {
-            packageManager.getPackageInfo(packageName, 0).versionName ?: "1.0.0"
+            packageManager.getPackageInfo(packageName, 0).versionName ?: "1.1.0"
         } catch (e: Exception) {
-            "1.0.0"
+            "1.1.0"
         }
         MaterialAlertDialogBuilder(this)
             .setTitle("关于轻隧")

@@ -5,6 +5,7 @@ using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.IO;
 using System.Reflection;
+using System.Text;
 using System.Windows.Forms;
 
 namespace LiteTunnel
@@ -23,6 +24,7 @@ namespace LiteTunnel
         private Label emptyLabel;
         private Label statusTitle;
         private Label statusSubtitle;
+        private Label monthlyLabel;
         private Panel statusDot;
         private Button connectButton;
         private Button importButton;
@@ -33,6 +35,9 @@ namespace LiteTunnel
         private Label footerLabel;
         private LinkLabel installLink;
         private Timer refreshTimer;
+        private Timer monthlyTimer;
+        private bool monthlyFetching;
+        private string monthlyStatsTunnel;
 
         private List<ProfileInfo> profiles = new List<ProfileInfo>();
         private bool busy;
@@ -83,6 +88,10 @@ namespace LiteTunnel
             refreshTimer.Interval = 1500;
             refreshTimer.Tick += delegate { RefreshState(); };
             refreshTimer.Start();
+
+            monthlyTimer = new Timer();
+            monthlyTimer.Interval = 60000;
+            monthlyTimer.Tick += delegate { RefreshMonthlyStats(); };
         }
 
         private Control BuildHeader()
@@ -109,7 +118,7 @@ namespace LiteTunnel
 
             Label version = new Label();
             version.AutoSize = true;
-            version.Text = "v1.0.0";
+            version.Text = "v1.1.0";
             version.ForeColor = Color.FromArgb(190, 215, 255);
             version.Font = new Font("Microsoft YaHei UI", 9F);
             version.Location = new Point(720, 22);
@@ -179,7 +188,7 @@ namespace LiteTunnel
             layout.ColumnCount = 1;
             layout.RowCount = 2;
             layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 104F));
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 128F));
             layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
             content.Controls.Add(layout);
 
@@ -223,6 +232,14 @@ namespace LiteTunnel
             statusSubtitle.Text = "导入配置后即可连接";
             statusSubtitle.Location = new Point(46, 58);
             card.Controls.Add(statusSubtitle);
+
+            monthlyLabel = new Label();
+            monthlyLabel.AutoSize = true;
+            monthlyLabel.Font = new Font("Microsoft YaHei UI", 9F);
+            monthlyLabel.ForeColor = Muted;
+            monthlyLabel.Text = "本月流量：连接后获取";
+            monthlyLabel.Location = new Point(46, 84);
+            card.Controls.Add(monthlyLabel);
 
             connectButton = new Button();
             connectButton.Text = "连接";
@@ -348,6 +365,24 @@ namespace LiteTunnel
             statusDotColor = running != null ? Success : Muted;
             statusDot.Invalidate();
 
+            if (running != null)
+            {
+                if (!string.Equals(monthlyStatsTunnel, running, StringComparison.OrdinalIgnoreCase))
+                {
+                    monthlyStatsTunnel = running;
+                    monthlyLabel.Text = "本月流量：获取中……";
+                    RefreshMonthlyStats();
+                }
+                if (!monthlyTimer.Enabled)
+                    monthlyTimer.Start();
+            }
+            else
+            {
+                monthlyStatsTunnel = null;
+                monthlyTimer.Stop();
+                monthlyLabel.Text = "本月流量：连接后获取";
+            }
+
             installLink.Visible = !installed;
             if (installed)
             {
@@ -423,6 +458,101 @@ namespace LiteTunnel
                 }
             }
             return null;
+        }
+
+        /// <summary>从服务端 VPN 内网 API 刷新当前客户端的月度流量。</summary>
+        private void RefreshMonthlyStats()
+        {
+            if (monthlyFetching)
+                return;
+            string running = FindActiveTunnelName();
+            if (running == null)
+                return;
+
+            ProfileInfo profile = null;
+            foreach (ProfileInfo item in profiles)
+            {
+                if (string.Equals(item.TunnelName, running, StringComparison.OrdinalIgnoreCase))
+                {
+                    profile = item;
+                    break;
+                }
+            }
+            if (profile == null)
+                return;
+
+            string configText;
+            try
+            {
+                configText = File.ReadAllText(profile.FilePath, Encoding.UTF8);
+            }
+            catch (Exception)
+            {
+                monthlyLabel.Text = "本月流量：无法读取配置";
+                return;
+            }
+
+            string url = ProfileStore.GetStatsUrl(configText);
+            string token = ProfileStore.GetStatsToken(configText);
+            if (string.IsNullOrEmpty(url) || string.IsNullOrEmpty(token))
+            {
+                monthlyLabel.Text = "本月流量：服务端未配置统计";
+                return;
+            }
+
+            monthlyFetching = true;
+            System.Threading.ThreadPool.QueueUserWorkItem(delegate
+            {
+                string error;
+                TrafficResponse response = TrafficStatsClient.Fetch(url, token, out error);
+                if (IsDisposed)
+                    return;
+                try
+                {
+                    BeginInvoke(new MethodInvoker(delegate
+                    {
+                        monthlyFetching = false;
+                        if (IsDisposed)
+                            return;
+                        if (!string.Equals(FindActiveTunnelName(), running,
+                            StringComparison.OrdinalIgnoreCase))
+                        {
+                            return;
+                        }
+                        if (response == null)
+                        {
+                            monthlyLabel.Text = "本月流量：暂时无法获取";
+                        }
+                        else
+                        {
+                            string period = string.IsNullOrEmpty(response.period)
+                                ? string.Empty : "（" + response.period + "）";
+                            // 服务端 rx = 服务器收到（客户端上传），tx = 服务器发出（客户端下载）
+                            monthlyLabel.Text = "本月流量：↓ " + FormatBytes(response.tx)
+                                + "   ↑ " + FormatBytes(response.rx) + period;
+                        }
+                    }));
+                }
+                catch (InvalidOperationException)
+                {
+                    monthlyFetching = false;
+                }
+            });
+        }
+
+        private static string FormatBytes(long bytes)
+        {
+            if (bytes < 1024)
+                return bytes.ToString() + " B";
+            string[] units = new string[] { "KB", "MB", "GB", "TB" };
+            double value = bytes;
+            int index = -1;
+            while (value >= 1024.0 && index < units.Length - 1)
+            {
+                value /= 1024.0;
+                index++;
+            }
+            return value.ToString("0.0") + " " + units[index];
         }
 
         private void ConnectAsync(ProfileInfo profile, string activeTunnelName)
@@ -779,7 +909,7 @@ namespace LiteTunnel
         private void ShowAbout()
         {
             Version version = Assembly.GetExecutingAssembly().GetName().Version;
-            string versionText = version != null ? version.ToString(3) : "1.0.0";
+            string versionText = version != null ? version.ToString(3) : "1.1.0";
             MessageBox.Show(this,
                 "轻隧 LiteTunnel v" + versionText + "\r\n\r\n" +
                 "一个基于 WireGuard 的 Windows VPN 客户端。\r\n" +
@@ -862,6 +992,11 @@ namespace LiteTunnel
             {
                 refreshTimer.Stop();
                 refreshTimer.Dispose();
+            }
+            if (monthlyTimer != null)
+            {
+                monthlyTimer.Stop();
+                monthlyTimer.Dispose();
             }
             base.OnFormClosed(e);
         }

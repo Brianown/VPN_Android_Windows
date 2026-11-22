@@ -20,6 +20,8 @@ WG_DNS="${WG_DNS:-1.1.1.1, 8.8.8.8}"
 WG_MTU="${WG_MTU:-1420}"
 WG_ENDPOINT="${WG_ENDPOINT:-}"
 CLIENT_DIR="${CLIENT_DIR:-/root/litetunnel/clients}"
+STATS_PORT="${STATS_PORT:-8080}"
+STATS_TZ="${STATS_TZ:-Asia/Shanghai}"
 CONF="/etc/wireguard/${WG_IF}.conf"
 
 if [[ -t 1 ]]; then
@@ -33,6 +35,13 @@ info() { printf '%s[LiteTunnel]%s %s\n' "$C_CYAN" "$C_RESET" "$*"; }
 ok()   { printf '%s[   OK   ]%s %s\n' "$C_GREEN" "$C_RESET" "$*"; }
 warn() { printf '%s[  WARN  ]%s %s\n' "$C_YELLOW" "$C_RESET" "$*" >&2; }
 die()  { printf '%s[ FAILED ]%s %s\n' "$C_RED" "$C_RESET" "$*" >&2; exit 1; }
+
+gen_token() {
+    local token
+    token="$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')"
+    [[ ${#token} -eq 32 ]] || die "生成 StatsToken 失败。"
+    printf '%s' "${token}"
+}
 
 usage() {
     cat <<EOF
@@ -52,6 +61,7 @@ LiteTunnel（轻隧）服务端管理工具
   config <名称>    打印客户端完整配置
   del <名称>       删除并吊销客户端
   status           查看服务和端口状态
+  traffic          查看服务端当前月度流量 JSON
   uninstall        卸载 LiteTunnel（保留已安装的系统软件包）
   help             显示本帮助
 
@@ -131,7 +141,7 @@ human_handshake() {
 cmd_add() {
     require_root "add"
     require_install
-    local name="$1" ip private public psk
+    local name="$1" ip private public psk token
     valid_name "${name}" || die "名称不合法。只能使用字母、数字、下划线、短横线，长度 1-15。"
     if grep -q "^# litetunnel: name=${name}$" "${CONF}"; then
         die "客户端 ${name} 已存在。"
@@ -141,11 +151,13 @@ cmd_add() {
     private="$(wg genkey)"
     public="$(printf '%s' "${private}" | wg pubkey)"
     psk="$(wg genpsk)"
+    token="$(gen_token)"
 
     cat >> "${CONF}" <<EOF
 
 [Peer]
 # litetunnel: name=${name}
+# litetunnel: token=${token}
 PublicKey = ${public}
 PresharedKey = ${psk}
 AllowedIPs = ${WG_NET}.${ip}/32
@@ -155,6 +167,8 @@ EOF
     chmod 700 "${CLIENT_DIR}"
     cat > "${CLIENT_DIR}/${name}.conf" <<EOF
 # Name = ${name}
+# StatsURL = http://${WG_NET}.1:${STATS_PORT}/api/traffic
+# StatsToken = ${token}
 [Interface]
 PrivateKey = ${private}
 Address = ${WG_NET}.${ip}/24
@@ -181,6 +195,10 @@ EOF
         fi
     else
         warn "WireGuard 当前未运行，客户端将在服务启动后生效。"
+    fi
+
+    if systemctl is-active --quiet litetunnel-traffic.timer 2>/dev/null; then
+        systemctl start litetunnel-traffic.service >/dev/null 2>&1 || true
     fi
 
     ok "已添加客户端：${name}"
@@ -262,7 +280,7 @@ cmd_server_key() {
 cmd_add_pubkey() {
     require_root "add-pubkey"
     require_install
-    local name="$1" pubkey="$2" ip psk peer_file
+    local name="$1" pubkey="$2" ip psk token peer_file
     valid_name "${name}" || die "名称不合法。只能使用字母、数字、下划线、短横线，长度 1-15。"
     [[ ${pubkey} =~ ^[A-Za-z0-9+/]{43}=$ ]] || die "公钥格式不正确，应为 44 个字符的 WireGuard base64 公钥。"
     if grep -q "^# litetunnel: name=${name}$" "${CONF}"; then
@@ -271,6 +289,7 @@ cmd_add_pubkey() {
 
     ip="$(next_ip)"
     psk="$(wg genpsk)"
+    token="$(gen_token)"
     mkdir -p "${CLIENT_DIR}"
     chmod 700 "${CLIENT_DIR}"
 
@@ -278,6 +297,7 @@ cmd_add_pubkey() {
 
 [Peer]
 # litetunnel: name=${name}
+# litetunnel: token=${token}
 PublicKey = ${pubkey}
 PresharedKey = ${psk}
 AllowedIPs = ${WG_NET}.${ip}/32
@@ -297,6 +317,8 @@ EOF
     cat > "${peer_file}" <<EOF
 # 客户端 ${name} 的 Peer 信息
 # 你已有自己的客户端私钥；请把下面的内容合并到你的 WireGuard 配置中。
+# StatsURL = http://${WG_NET}.1:${STATS_PORT}/api/traffic
+# StatsToken = ${token}
 [Interface]
 Address = ${WG_NET}.${ip}/24
 DNS = ${WG_DNS}
@@ -311,6 +333,10 @@ AllowedIPs = 0.0.0.0/0
 PersistentKeepalive = 25
 EOF
     chmod 600 "${peer_file}"
+
+    if systemctl is-active --quiet litetunnel-traffic.timer 2>/dev/null; then
+        systemctl start litetunnel-traffic.service >/dev/null 2>&1 || true
+    fi
 
     ok "已用公钥添加客户端：${name}"
     printf '  IP        : %s\n' "${WG_NET}.${ip}"
@@ -414,8 +440,19 @@ cmd_del() {
     cat "${tmp}" > "${CONF}"
     rm -f "${tmp}"
 
-    rm -f "${CLIENT_DIR}/${name}.conf" "${CLIENT_DIR}/${name}.png"
+    rm -f "${CLIENT_DIR}/${name}.conf" "${CLIENT_DIR}/${name}.png" "${CLIENT_DIR}/${name}.peer.txt"
+    if systemctl is-active --quiet litetunnel-traffic.timer 2>/dev/null; then
+        systemctl start litetunnel-traffic.service >/dev/null 2>&1 || true
+    fi
     ok "已删除并吊销客户端：${name}"
+}
+
+cmd_traffic() {
+    require_root "traffic"
+    require_install
+    local file="/var/lib/litetunnel/traffic.json"
+    [[ -f ${file} ]] || die "流量统计文件尚未生成，请检查 litetunnel-traffic.service。"
+    python3 -m json.tool "${file}"
 }
 
 cmd_status() {
@@ -427,6 +464,11 @@ cmd_status() {
         warn "wg-quick@${WG_IF} 未运行"
     fi
     wg show "${WG_IF}" 2>/dev/null || true
+    if systemctl is-active --quiet litetunnel-api.service 2>/dev/null; then
+        ok "流量统计 API 正在运行"
+    else
+        warn "流量统计 API 未运行（客户端会显示：暂时无法获取）"
+    fi
     if command -v ss >/dev/null 2>&1; then
         printf '\nUDP %s 监听状态：\n' "${WG_PORT}"
         ss -lunp 2>/dev/null | grep -E ":${WG_PORT}[[:space:]]" || warn "未看到监听（可能需要 root 权限查看）"
@@ -443,9 +485,14 @@ cmd_uninstall() {
         info "已取消。"
         exit 0
     fi
+    systemctl disable --now litetunnel-api.service litetunnel-traffic.timer >/dev/null 2>&1 || true
     systemctl disable --now "wg-quick@${WG_IF}" >/dev/null 2>&1 || true
     rm -f "${CONF}" "${ENV_FILE}" /etc/sysctl.d/99-litetunnel.conf /usr/local/bin/litetunnel
-    rm -rf /root/litetunnel
+    rm -f /etc/systemd/system/litetunnel-traffic.service \
+        /etc/systemd/system/litetunnel-traffic.timer \
+        /etc/systemd/system/litetunnel-api.service
+    rm -rf /usr/local/lib/litetunnel /var/lib/litetunnel /root/litetunnel
+    systemctl daemon-reload
     ok "LiteTunnel 已卸载。WireGuard 软件包保留在系统中。"
 }
 
@@ -492,6 +539,9 @@ main() {
             ;;
         status)
             cmd_status
+            ;;
+        traffic)
+            cmd_traffic
             ;;
         uninstall)
             cmd_uninstall
