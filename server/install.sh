@@ -9,8 +9,9 @@
 #   sudo bash server/install.sh
 #
 # 用法（一键，发布到 GitHub 后）：
-#   curl -fsSL https://github.com/<你的用户名>/litetunnel/archive/refs/heads/main.tar.gz \
-#     | tar xz -C /opt && sudo bash /opt/litetunnel-main/server/install.sh
+#   curl -fsSL https://github.com/Brianown/VPN_Android_Windows/archive/refs/heads/main.tar.gz \
+#     -o /tmp/vpn.tar.gz && sudo tar xzf /tmp/vpn.tar.gz -C /opt \
+#     && sudo bash /opt/VPN_Android_Windows-main/server/install.sh
 #
 # 可选环境变量：
 #   WG_PORT=51820             WireGuard UDP 端口
@@ -20,6 +21,7 @@
 #   WG_CLIENTS=3              初始生成的客户端数量
 #   WG_ENDPOINT=1.2.3.4       服务器公网 IP（默认自动探测，NAT 后面需手动指定）
 #   CLIENT_PREFIX=client      客户端名前缀
+#   WG_PRINT_CONFIGS=1        安装完成后打印所有客户端导入内容（含私钥；设为 0 关闭）
 #
 set -Eeuo pipefail
 
@@ -30,6 +32,7 @@ WG_DNS="${WG_DNS:-1.1.1.1, 8.8.8.8}"
 WG_MTU="${WG_MTU:-1420}"
 WG_CLIENTS="${WG_CLIENTS:-3}"
 CLIENT_PREFIX="${CLIENT_PREFIX:-client}"
+WG_PRINT_CONFIGS="${WG_PRINT_CONFIGS:-1}"
 
 STATE_DIR="/etc/wireguard"
 CONF="${STATE_DIR}/${WG_IF}.conf"
@@ -287,6 +290,7 @@ printf '\n%s%s 安装完成！%s\n\n' "${C_GREEN}" "${C_BOLD}" "${C_RESET}"
 cat <<EOF
 服务器公网地址 : ${ENDPOINT}
 WireGuard 端口 : ${WG_PORT}/udp
+服务器公钥     : ${SERVER_PUBLIC}
 虚拟网段       : ${WG_NET}.0/24
 服务端配置     : ${CONF}
 客户端配置目录 : ${CLIENT_DIR}
@@ -312,5 +316,19 @@ ${C_BOLD}重要：${C_RESET}
   * Oracle Cloud 默认还有实例内 iptables 规则，必要时手动放行；
   * 客户端私钥只保存在本机，请勿把 .conf 或二维码发给别人；
   * 中国大陆网络对 UDP 的干扰较严重，WireGuard 可能不稳定；
-    对抗封锁建议使用仓库中 docs/xray-reality.md 的 Xray REALITY 方案。
+    对抗封锁建议阅读仓库中的 docs/china.md。
 EOF
+
+# 打印【所有客户端需要导入的设置】，方便直接复制到手机/电脑。
+if [[ -x /usr/local/bin/litetunnel ]]; then
+    if [[ ${WG_PRINT_CONFIGS} == "1" ]]; then
+        printf '\n%s%s 注意：以下内容包含客户端私钥 %s\n' "${C_YELLOW}" "${C_BOLD}" "${C_RESET}"
+        printf '请勿在录屏、直播或公开日志中展示；不要截图发到公开群聊。\n\n'
+        /usr/local/bin/litetunnel export || warn "自动导出失败，请手动执行：sudo litetunnel export"
+    else
+        /usr/local/bin/litetunnel export --quiet || warn "自动导出失败，请手动执行：sudo litetunnel export"
+        printf '私钥内容已写入 %s/import-all.txt（未在终端打印）。\n' "${CLIENT_DIR}"
+    fi
+else
+    warn "未找到 litetunnel 命令，无法自动导出；请使用 ${CLIENT_DIR} 下的 .conf 文件。"
+fi

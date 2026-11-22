@@ -2,6 +2,8 @@
 
 一套**可自托管、开源**的 WireGuard VPN 方案：服务端一条命令安装，附带 Android 与 Windows 客户端。
 
+> GitHub 仓库：<https://github.com/Brianown/VPN_Android_Windows>
+>
 > 适合：自建 VPS 访问公网、家庭/公司内网互联、给手机和电脑统一出口。
 > 服务端使用标准 WireGuard 协议，**客户端也可以直接使用官方 WireGuard App** 导入配置。
 >
@@ -23,10 +25,32 @@
 - **标准协议**：没有自造加密协议，服务端就是标准 WireGuard，可以用官方客户端、路由器或其他兼容工具连接。
 - **开源**：Apache-2.0，代码量小，便于学习和二次开发。
 
+## 加密与隐私（先读）
+
+WireGuard 会加密客户端与服务器之间的**全部 IP 流量**，包括访问的域名、目的 IP、DNS 查询和网页内容，使用
+Curve25519 + ChaCha20-Poly1305；每个客户端还额外配置了 `PresharedKey`（预共享密钥），相当于在公钥加密之上再加一层对称密钥。
+
+但要明确边界：
+
+| 谁能看到什么 | 能看到 |
+| --- | --- |
+| 本地网络 / 运营商 / 路径上的监听者 | 只看到你连接 VPN 服务器的 UDP 地址、端口、包大小和时间；看不到你访问的网站和内容 |
+| VPN 服务器（以及有服务器 root 权限的人） | 能看到你访问的目的 IP、DNS 和未加密的 HTTP；HTTPS 内容仍由网站证书保护 |
+| 目标网站 | 看到 VPN 服务器的 IP，而不是你的家庭/手机 IP |
+| 服务器所在的云厂商 | 可能记录连接时间、流量大小等元数据 |
+
+**“再加密”不能保证任何人绝对看不到**：如果还是同一个 VPN 服务器作为出口，它仍然能看到目的地；要隐藏
+“谁访问了什么”，需要多跳网络或 Tor 这类匿名网络，而不是简单把同一个包再加密一次。任何声称“任何部门、
+任何黑客都绝对无法监听”的软件都不可信。
+
+- 想要**抗封锁**：使用 TCP/TLS 伪装（Xray REALITY 等），见 [docs/china.md](docs/china.md)；
+- 想要**隐藏目的地**：使用 Tor 或多跳网络，详见 [docs/privacy.md](docs/privacy.md)；
+- 日常使用：网站全站 HTTPS、开启加密 DNS、不要让 IPv6 绕过隧道、定期更新服务器。
+
 ## 项目结构
 
 ```text
-litetunnel/
+VPN_Android_Windows/
 ├── server/
 │   ├── install.sh              # 服务端一键安装
 │   └── manage.sh               # 客户端管理（安装后为 /usr/local/bin/litetunnel）
@@ -35,6 +59,7 @@ litetunnel/
 │   └── windows/                # .NET Framework 4.8 WinForms 工程与构建脚本
 ├── docs/
 │   ├── china.md                # 中国大陆网络环境说明
+│   ├── privacy.md              # 加密边界、隐私与多跳/匿名网络说明
 │   └── screenshot-*.png
 ├── .github/workflows/build.yml # GitHub Actions：自动构建 APK 和 EXE
 ├── LICENSE / NOTICE
@@ -52,20 +77,21 @@ litetunnel/
 
 ### 2. 一行命令安装服务端
 
-把下面命令里的 `YOUR_GITHUB_USER` 换成你的 GitHub 用户名（发布仓库后）：
-
 ```bash
-curl -fsSL https://github.com/YOUR_GITHUB_USER/litetunnel/archive/refs/heads/main.tar.gz -o /tmp/litetunnel.tar.gz \
-  && sudo tar xzf /tmp/litetunnel.tar.gz -C /opt \
-  && sudo bash /opt/litetunnel-main/server/install.sh
+curl -fsSL https://github.com/Brianown/VPN_Android_Windows/archive/refs/heads/main.tar.gz -o /tmp/vpn.tar.gz \
+  && sudo tar xzf /tmp/vpn.tar.gz -C /opt \
+  && sudo bash /opt/VPN_Android_Windows-main/server/install.sh
 ```
 
-或者先在本地把仓库传到服务器，再执行：
+如果 GitHub 访问慢，也可以先把仓库下载/上传到服务器，然后执行：
 
 ```bash
-git clone --depth 1 https://github.com/YOUR_GITHUB_USER/litetunnel.git /opt/litetunnel
-sudo bash /opt/litetunnel/server/install.sh
+git clone --depth 1 https://github.com/Brianown/VPN_Android_Windows.git /opt/VPN_Android_Windows
+sudo bash /opt/VPN_Android_Windows/server/install.sh
 ```
+
+> 仓库名或默认分支不同的话，把上面的 `VPN_Android_Windows` / `main` 换成实际值。
+> 如果服务器上没有 `git`，也可以直接上传 ZIP 解压后运行 `server/install.sh`。
 
 安装脚本会：
 
@@ -74,28 +100,62 @@ sudo bash /opt/litetunnel/server/install.sh
 3. 生成服务端密钥、3 个客户端密钥和配置；
 4. 生成每个客户端的 `.conf` 和 `.png` 二维码；
 5. 启动并开机自启 `wg-quick@wg0`；
-6. 安装管理命令 `/usr/local/bin/litetunnel`。
+6. 安装管理命令 `/usr/local/bin/litetunnel`；
+7. 生成 `/root/litetunnel/clients/import-all.txt`，并在终端打印**所有客户端需要导入的完整设置**。
 
-安装完成后会打印服务器公网 IP、端口、客户端目录：
+安装完成后会看到类似输出：
 
 ```text
-客户端配置目录 : /root/litetunnel/clients
-已生成客户端：
-  client1   IP: 10.66.66.2   配置: /root/litetunnel/clients/client1.conf  二维码: .../client1.png
-  client2   IP: 10.66.66.3   ...
+============================
+所有客户端需要导入的设置。
+============================
+服务器: 203.0.113.10:51820
+说明: 从每个客户端的 [Interface] 开始复制到文件末尾，粘贴到客户端即可。
+      以下内容包含客户端私钥，请通过安全渠道传输。
+
+----- client1 -----
+[Interface]
+PrivateKey = ...
+Address = 10.66.66.2/24
+DNS = 1.1.1.1, 8.8.8.8
+MTU = 1420
+
+[Peer]
+PublicKey = ...
+PresharedKey = ...
+Endpoint = 203.0.113.10:51820
+AllowedIPs = 0.0.0.0/0
+PersistentKeepalive = 25
+...
 ```
 
-可以用 `scp` 把配置或二维码下载到本地：
+如果不希望私钥出现在终端里，可以在安装时关闭打印：
+
+```bash
+sudo WG_PRINT_CONFIGS=0 bash server/install.sh
+```
+
+之后随时可以重新生成并打印：
+
+```bash
+sudo litetunnel export
+```
+
+也可以用 `scp` 下载单个配置或二维码：
 
 ```bash
 scp root@你的服务器IP:/root/litetunnel/clients/client1.png .
 scp root@你的服务器IP:/root/litetunnel/clients/client1.conf .
+scp root@你的服务器IP:/root/litetunnel/clients/import-all.txt .
 ```
 
 ### 3. 添加更多客户端
 
 ```bash
 sudo litetunnel add phone        # 添加名为 phone 的客户端
+sudo litetunnel add-pubkey pc <客户端公钥>  # 已有客户端私钥，只把公钥加到服务器
+sudo litetunnel export           # 生成并打印所有客户端导入内容（含私钥）
+sudo litetunnel server-key       # 查看服务器公钥 / Endpoint
 sudo litetunnel list             # 查看所有客户端、IP、握手时间、流量
 sudo litetunnel qr phone         # 在终端里直接显示二维码
 sudo litetunnel config phone     # 打印配置
@@ -105,7 +165,31 @@ sudo litetunnel status           # 查看服务 / 端口状态
 
 客户端名称只能使用字母、数字、下划线、短横线，最长 15 个字符。
 
-### 4. 安装客户端
+### 4. 密钥管理（重要）
+
+WireGuard 使用“公钥 + 私钥”：
+
+- **服务器私钥**只保存在服务器 `/etc/wireguard/wg0.conf`，权限 600；
+- **客户端私钥**只保存在客户端配置 `.conf` 里，服务器和客户端各有一份；
+- 每对客户端还额外生成 `PresharedKey`，相当于再加一层对称密钥；
+- **不要把私钥发到聊天、GitHub、群里**。需要给别人设备添加访问权限时，只交换公钥。
+
+常用命令：
+
+```bash
+sudo litetunnel server-key        # 查看服务器公钥和 Endpoint
+sudo litetunnel config phone      # 查看 phone 客户端的完整配置（含私钥，注意保密）
+sudo litetunnel add laptop        # 新设备：生成新密钥和完整配置
+sudo litetunnel add-pubkey pc <客户端公钥>
+```
+
+`add-pubkey` 适用于“客户端已经有自己的私钥”的场景：它把公钥加到服务器，并返回 Peer 模板（包含服务器公钥、
+PresharedKey、Endpoint），不会生成或显示客户端私钥。
+
+> 本项目不会在聊天或网页里替你生成并发送私钥。私钥一旦离开你的设备/服务器，就应该视为泄露，必须用
+> `sudo litetunnel del 名称` 删除并用新名称重新添加。
+
+### 5. 安装客户端
 
 #### Android
 
@@ -129,7 +213,7 @@ sudo litetunnel status           # 查看服务 / 端口状态
 > 关闭 LiteTunnel 窗口不会自动断开 VPN；重新打开客户端即可看到连接状态并断开。
 > LiteTunnel 只管理自己的配置目录中的隧道，不会影响你用官方 WireGuard 客户端创建的其它隧道。
 
-### 5. 不想用自带客户端？
+### 6. 不想用自带客户端？
 
 服务端生成的是标准 WireGuard 配置，可以直接导入：
 
@@ -145,7 +229,7 @@ sudo litetunnel status           # 查看服务 / 端口状态
 安装时可通过环境变量覆盖默认值：
 
 ```bash
-sudo WG_PORT=443 WG_CLIENTS=5 bash /opt/litetunnel-main/server/install.sh
+sudo WG_PORT=443 WG_CLIENTS=5 bash /opt/VPN_Android_Windows-main/server/install.sh
 ```
 
 | 变量 | 默认值 | 说明 |
@@ -158,11 +242,12 @@ sudo WG_PORT=443 WG_CLIENTS=5 bash /opt/litetunnel-main/server/install.sh
 | `WG_ENDPOINT` | 自动探测 | 服务器公网 IP；在 NAT 后面时必须手动指定 |
 | `CLIENT_PREFIX` | `client` | 初始客户端名前缀 |
 | `WG_IF` | `wg0` | 服务端网卡名 |
+| `WG_PRINT_CONFIGS` | `1` | 安装完成后打印所有客户端配置；`0` 关闭 |
 
 修改端口示例：
 
 ```bash
-sudo WG_PORT=443 WG_ENDPOINT=1.2.3.4 bash /opt/litetunnel-main/server/install.sh
+sudo WG_PORT=443 WG_ENDPOINT=1.2.3.4 bash /opt/VPN_Android_Windows-main/server/install.sh
 ```
 
 安装完成后状态文件在 `/etc/wireguard/litetunnel.env`，服务端配置在 `/etc/wireguard/wg0.conf`。
@@ -277,7 +362,7 @@ sudo litetunnel uninstall
 
 ```bash
 sudo litetunnel uninstall
-sudo WG_PORT=443 WG_ENDPOINT=你的公网IP bash /opt/litetunnel-main/server/install.sh
+sudo WG_PORT=443 WG_ENDPOINT=你的公网IP bash /opt/VPN_Android_Windows-main/server/install.sh
 ```
 
 然后重新导出客户端配置。
@@ -297,27 +382,31 @@ sudo WG_PORT=443 WG_ENDPOINT=你的公网IP bash /opt/litetunnel-main/server/ins
   ```
 
 - 本项目不包含任何流量日志、账号系统或遥测。
+- 加密能保护“内容”，但不能让 VPN 服务器看不到你的目的地；详见 [docs/privacy.md](docs/privacy.md) 和 [docs/china.md](docs/china.md)。
 
 ## 发布到 GitHub
 
-1. 新建一个名为 `litetunnel` 的公开仓库；
-2. 推送到 `main` 分支；
-3. 把 README 中的 `YOUR_GITHUB_USER` 替换成你的用户名；
-4. 在 Actions 中等待构建完成，下载 Artifact；
-5. 创建 Release（例如 `v1.0.0`），上传 APK 和 EXE。
+本地仓库已经初始化并提交，只需推送到：
+
+```text
+https://github.com/Brianown/VPN_Android_Windows.git
+```
+
+```bash
+git remote add origin https://github.com/Brianown/VPN_Android_Windows.git
+# 如果已经添加过 origin：
+# git remote set-url origin https://github.com/Brianown/VPN_Android_Windows.git
+git push -u origin main
+```
+
+推送后：
+
+1. 在 Actions 中等待构建完成，下载 Artifact；
+2. 创建 Release（例如 `v1.0.0`），上传 APK 和 EXE。
 
 > 随附的 `litetunnel-v1.0.0.zip` 中包含预编译的 APK / EXE（位于 `release/`）。
 > `release/` 已被 `.gitignore` 忽略，发布时建议把这两个文件上传到 GitHub Release，
 > 而不是直接提交进 Git 仓库。
-
-```bash
-git init
-git add .
-git commit -m "feat: initial LiteTunnel"
-git branch -M main
-git remote add origin https://github.com/YOUR_GITHUB_USER/litetunnel.git
-git push -u origin main
-```
 
 ## 协议与致谢
 

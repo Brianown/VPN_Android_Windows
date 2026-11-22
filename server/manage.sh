@@ -41,7 +41,11 @@ LiteTunnel（轻隧）服务端管理工具
 用法：sudo litetunnel <命令> [参数]
 
 命令：
-  add <名称>       添加一个客户端（名称限字母/数字/下划线/短横线，最长 15 位）
+  add <名称>       添加一个客户端（自动生成密钥，名称限字母/数字/下划线/短横线，最长 15 位）
+  add-pubkey <名称> <公钥>
+                   用已有的客户端公钥添加 peer（不生成客户端私钥）
+  export [--quiet] 生成并打印【所有客户端需要导入的设置】（含私钥，注意保密；--quiet 只写文件）
+  server-key       显示服务器公钥、Endpoint 和虚拟网段
   list             列出客户端、IP、最近握手和流量
   show             显示 wg 运行状态
   qr <名称>        在终端显示客户端二维码
@@ -53,6 +57,7 @@ LiteTunnel（轻隧）服务端管理工具
 
 示例：
   sudo litetunnel add phone
+  sudo litetunnel export
   sudo litetunnel qr phone
   sudo litetunnel list
 EOF
@@ -185,6 +190,132 @@ EOF
   二维码    : ${CLIENT_DIR}/${name}.png
   终端二维码: sudo litetunnel qr ${name}
 EOF
+}
+
+cmd_export() {
+    require_root "export"
+    require_install
+    local quiet=0
+    if [[ ${1:-} == "--quiet" ]]; then
+        quiet=1
+    fi
+    mkdir -p "${CLIENT_DIR}"
+    chmod 700 "${CLIENT_DIR}"
+
+    local out="${CLIENT_DIR}/import-all.txt"
+    local bundle="${CLIENT_DIR}/litetunnel-clients.tar.gz"
+    local file name found=0
+
+    {
+        printf '============================\n'
+        printf '所有客户端需要导入的设置。\n'
+        printf '============================\n'
+        printf '服务器: %s:%s\n' "${WG_ENDPOINT}" "${WG_PORT}"
+        printf '说明: 从每个客户端的 [Interface] 开始复制到文件末尾，粘贴到客户端即可。\n'
+        printf '      以下内容包含客户端私钥，请通过安全渠道传输。\n\n'
+        for file in "${CLIENT_DIR}"/*.conf; do
+            [[ -e ${file} ]] || continue
+            found=1
+            name="$(basename "${file}" .conf)"
+            printf '%s\n' "----- ${name} -----"
+            cat "${file}"
+            printf '\n'
+        done
+    } > "${out}"
+    chmod 600 "${out}"
+
+    if (( found == 0 )); then
+        warn "没有找到客户端配置；请先执行 sudo litetunnel add <名称>。"
+        cat "${out}"
+        return 0
+    fi
+
+    if command -v tar >/dev/null 2>&1; then
+        local tmp_bundle
+        tmp_bundle="$(mktemp)"
+        if tar -czf "${tmp_bundle}" --exclude='import-all.txt' -C "${CLIENT_DIR}" . 2>/dev/null; then
+            chmod 600 "${tmp_bundle}"
+            mv "${tmp_bundle}" "${bundle}"
+        else
+            rm -f "${tmp_bundle}"
+        fi
+    fi
+
+    ok "已生成客户端导入内容"
+    printf '  文本文件: %s\n' "${out}"
+    [[ -f ${bundle} ]] && printf '  打包文件: %s\n' "${bundle}"
+    if (( quiet == 0 )); then
+        printf '\n'
+        cat "${out}"
+    fi
+}
+
+cmd_server_key() {
+    require_root "server-key"
+    require_install
+    printf '服务器公钥 : %s\n' "$(server_public_key)"
+    printf 'Endpoint   : %s:%s\n' "${WG_ENDPOINT}" "${WG_PORT}"
+    printf '虚拟网段   : %s.0/24\n' "${WG_NET}"
+    printf '服务端配置 : %s\n' "${CONF}"
+}
+
+cmd_add_pubkey() {
+    require_root "add-pubkey"
+    require_install
+    local name="$1" pubkey="$2" ip psk peer_file
+    valid_name "${name}" || die "名称不合法。只能使用字母、数字、下划线、短横线，长度 1-15。"
+    [[ ${pubkey} =~ ^[A-Za-z0-9+/]{43}=$ ]] || die "公钥格式不正确，应为 44 个字符的 WireGuard base64 公钥。"
+    if grep -q "^# litetunnel: name=${name}$" "${CONF}"; then
+        die "客户端 ${name} 已存在。"
+    fi
+
+    ip="$(next_ip)"
+    psk="$(wg genpsk)"
+    mkdir -p "${CLIENT_DIR}"
+    chmod 700 "${CLIENT_DIR}"
+
+    cat >> "${CONF}" <<EOF
+
+[Peer]
+# litetunnel: name=${name}
+PublicKey = ${pubkey}
+PresharedKey = ${psk}
+AllowedIPs = ${WG_NET}.${ip}/32
+EOF
+
+    if systemctl is-active --quiet "wg-quick@${WG_IF}" 2>/dev/null; then
+        if ! wg set "${WG_IF}" peer "${pubkey}" \
+            preshared-key <(printf '%s\n' "${psk}") \
+            allowed-ips "${WG_NET}.${ip}/32" 2>/dev/null; then
+            warn "客户端已写入配置，但即时生效失败；重启后生效：systemctl restart wg-quick@${WG_IF}"
+        fi
+    else
+        warn "WireGuard 当前未运行，客户端将在服务启动后生效。"
+    fi
+
+    peer_file="${CLIENT_DIR}/${name}.peer.txt"
+    cat > "${peer_file}" <<EOF
+# 客户端 ${name} 的 Peer 信息
+# 你已有自己的客户端私钥；请把下面的内容合并到你的 WireGuard 配置中。
+[Interface]
+Address = ${WG_NET}.${ip}/24
+DNS = ${WG_DNS}
+MTU = ${WG_MTU}
+# PrivateKey = <在这里填写你自己的客户端私钥>
+
+[Peer]
+PublicKey = $(server_public_key)
+PresharedKey = ${psk}
+Endpoint = ${WG_ENDPOINT}:${WG_PORT}
+AllowedIPs = 0.0.0.0/0
+PersistentKeepalive = 25
+EOF
+    chmod 600 "${peer_file}"
+
+    ok "已用公钥添加客户端：${name}"
+    printf '  IP        : %s\n' "${WG_NET}.${ip}"
+    printf '  Peer 信息 : %s\n\n' "${peer_file}"
+    cat "${peer_file}"
 }
 
 cmd_list() {
@@ -330,6 +461,16 @@ main() {
         add)
             [[ $# -eq 1 ]] || die "用法：sudo litetunnel add <名称>"
             cmd_add "$1"
+            ;;
+        add-pubkey)
+            [[ $# -eq 2 ]] || die "用法：sudo litetunnel add-pubkey <名称> <客户端公钥>"
+            cmd_add_pubkey "$1" "$2"
+            ;;
+        export)
+            cmd_export "${1:-}"
+            ;;
+        server-key)
+            cmd_server_key
             ;;
         list)
             cmd_list
