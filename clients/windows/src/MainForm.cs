@@ -196,7 +196,7 @@ namespace LiteTunnel
 
             Label version = new Label();
             version.AutoSize = true;
-            version.Text = "v1.1.0";
+            version.Text = "v" + Assembly.GetExecutingAssembly().GetName().Version.ToString(3);
             version.ForeColor = Color.FromArgb(190, 215, 255);
             version.Font = new Font("Microsoft YaHei UI", 9F);
             version.Location = new Point(720, 22);
