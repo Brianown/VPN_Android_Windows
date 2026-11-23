@@ -1,4 +1,4 @@
-# 轻隧 Windows 客户端
+﻿# 轻隧 Windows 客户端
 
 基于 .NET Framework 4.8 的 WinForms 单文件客户端。隧道由官方开源的
 [WireGuard for Windows](https://www.wireguard.com/install/) 提供，本程序负责导入配置、
@@ -69,3 +69,8 @@ build.ps1                 # csc 编译脚本
 - **关闭程序后 VPN 还在**：这是预期行为，隧道由 Windows 服务运行；重新打开程序断开即可。
 - **想恢复官方客户端管理**：直接删除 `%APPDATA%\LiteTunnel\profiles` 下对应 `.conf`，
   或用官方 WireGuard 客户端导入同一份配置。
+
+## v1.1.1
+
+- 修复智能分流模式下 DNS 1.1.1.1/8.8.8.8 未进入隧道导致 YouTube 打不开的问题。
+- 国内 IP 继续直连，国外 IP 走代理。

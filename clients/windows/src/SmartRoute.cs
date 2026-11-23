@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.IO;
 using System.Reflection;
 using System.Text;
@@ -16,6 +16,8 @@ namespace LiteTunnel
             new Regex(@"^(\s*AllowedIPs\s*=\s*).*$", RegexOptions.Multiline);
         private static readonly Regex StatsUrlRegex =
             new Regex(@"^#\s*StatsURL\s*=\s*https?://([^/:\s]+)", RegexOptions.Multiline);
+        private static readonly Regex DnsRegex =
+            new Regex(@"^\s*DNS\s*=\s*(.+)$", RegexOptions.Multiline);
         private static readonly object SyncRoot = new object();
         private static string cachedRoutes;
 
@@ -29,6 +31,13 @@ namespace LiteTunnel
                 // 月度流量 API 在 VPN 内网，必须单独保留一条路由。
                 extra = statsMatch.Groups[1].Value.Trim() + "/32, ";
             }
+
+            // 关键：智能分流只放行“非中国 IP”，但配置里的 DNS 1.1.1.1/8.8.8.8
+            // 不在这个列表里，DNS 会绕过隧道，导致 YouTube 等域名解析失败。
+            // 把 DNS 服务器本身也加进 AllowedIPs，确保 DNS 查询走隧道。
+            string dnsExtra = BuildDnsRoutes(originalConfig);
+            if (dnsExtra.Length > 0)
+                extra += dnsExtra + ", ";
 
             string replaced = AllowedIpsRegex.Replace(originalConfig, delegate(Match match)
             {
@@ -44,6 +53,30 @@ namespace LiteTunnel
             string path = Path.Combine(directory, profile.TunnelName + ".conf");
             File.WriteAllText(path, replaced, new UTF8Encoding(false));
             return path;
+        }
+
+        private static string BuildDnsRoutes(string config)
+        {
+            Match match = DnsRegex.Match(config);
+            if (!match.Success)
+                return string.Empty;
+
+            StringBuilder builder = new StringBuilder();
+            foreach (string part in match.Groups[1].Value.Split(','))
+            {
+                string value = part.Trim();
+                if (value.Length == 0)
+                    continue;
+                System.Net.IPAddress address;
+                if (!System.Net.IPAddress.TryParse(value, out address))
+                    continue;
+                if (address.AddressFamily != System.Net.Sockets.AddressFamily.InterNetwork)
+                    continue;
+                if (builder.Length > 0)
+                    builder.Append(", ");
+                builder.Append(value).Append("/32");
+            }
+            return builder.ToString();
         }
 
         private static string LoadRoutes()
