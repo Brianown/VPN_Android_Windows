@@ -355,8 +355,8 @@ namespace LiteTunnel
             if (code != 0)
                 throw new Exception("创建 WireGuard 隧道失败（退出码 " + code + "）。\r\n" + output);
 
-            if (!WaitForService(tunnelName, true, 12000))
-                throw new Exception("WireGuard 隧道服务未能在 12 秒内启动，请检查配置或 Windows 事件查看器。");
+            if (!WaitForService(tunnelName, true, 30000))
+                throw new Exception("WireGuard 隧道服务未能在 30 秒内启动，请检查配置或 Windows 事件查看器。");
         }
 
         public static void StopTunnel(string tunnelName)

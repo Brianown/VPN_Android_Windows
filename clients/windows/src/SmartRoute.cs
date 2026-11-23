@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.IO;
 using System.Reflection;
 using System.Text;
@@ -18,12 +18,14 @@ namespace LiteTunnel
             new Regex(@"^#\s*StatsURL\s*=\s*https?://([^/:\s]+)", RegexOptions.Multiline);
         private static readonly Regex DnsRegex =
             new Regex(@"^\s*DNS\s*=\s*(.+)$", RegexOptions.Multiline);
+        private static readonly Regex EndpointRegex =
+            new Regex(@"^\s*Endpoint\s*=\s*([^:\s]+):", RegexOptions.Multiline);
         private static readonly object SyncRoot = new object();
         private static string cachedRoutes;
 
         public static string BuildSmartConfig(ProfileInfo profile, string originalConfig)
         {
-            string routes = LoadRoutes();
+            string routes = ExcludeEndpoint(LoadRoutes(), originalConfig);
             Match statsMatch = StatsUrlRegex.Match(originalConfig);
             string extra = string.Empty;
             if (statsMatch.Success)
@@ -55,6 +57,54 @@ namespace LiteTunnel
             return path;
         }
 
+        private static string ExcludeEndpoint(string routes, string config)
+        {
+            Match endpointMatch = EndpointRegex.Match(config);
+            if (!endpointMatch.Success)
+                return routes;
+
+            System.Net.IPAddress endpoint;
+            if (!System.Net.IPAddress.TryParse(endpointMatch.Groups[1].Value.Trim(), out endpoint))
+                return routes;
+            if (endpoint.AddressFamily != System.Net.Sockets.AddressFamily.InterNetwork)
+                return routes;
+
+            uint endpointValue = ToUInt32(endpoint);
+            StringBuilder builder = new StringBuilder();
+            foreach (string part in routes.Split(','))
+            {
+                string cidr = part.Trim();
+                if (cidr.Length == 0)
+                    continue;
+
+                string[] pieces = cidr.Split('/');
+                System.Net.IPAddress network;
+                int prefix;
+                if (pieces.Length == 2 && System.Net.IPAddress.TryParse(pieces[0], out network) &&
+                    int.TryParse(pieces[1], out prefix) &&
+                    network.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork)
+                {
+                    uint mask = prefix == 0 ? 0u : 0xFFFFFFFFu << (32 - prefix);
+                    if ((ToUInt32(network) & mask) == (endpointValue & mask))
+                    {
+                        // 不能把 WireGuard 服务器自身放进隧道，否则握手包会回环。
+                        continue;
+                    }
+                }
+
+                if (builder.Length > 0)
+                    builder.Append(", ");
+                builder.Append(cidr);
+            }
+            return builder.ToString();
+        }
+
+        private static uint ToUInt32(System.Net.IPAddress address)
+        {
+            byte[] bytes = address.GetAddressBytes();
+            return ((uint)bytes[0] << 24) | ((uint)bytes[1] << 16) |
+                   ((uint)bytes[2] << 8) | bytes[3];
+        }
         private static string BuildDnsRoutes(string config)
         {
             Match match = DnsRegex.Match(config);

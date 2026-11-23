@@ -4,5 +4,5 @@
 [assembly: AssemblyDescription("轻隧 LiteTunnel - 基于 WireGuard 的 Windows VPN 客户端")]
 [assembly: AssemblyProduct("轻隧 LiteTunnel")]
 [assembly: AssemblyCompany("LiteTunnel")]
-[assembly: AssemblyVersion("1.1.1.0")]
-[assembly: AssemblyFileVersion("1.1.1.0")]
+[assembly: AssemblyVersion("1.1.2.0")]
+[assembly: AssemblyFileVersion("1.1.2.0")]
