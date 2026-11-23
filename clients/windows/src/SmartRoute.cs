@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.IO;
 using System.Reflection;
 using System.Text;
@@ -54,6 +54,10 @@ namespace LiteTunnel
             Directory.CreateDirectory(directory);
             string path = Path.Combine(directory, profile.TunnelName + ".conf");
             File.WriteAllText(path, replaced, new UTF8Encoding(false));
+            Match endpoint = EndpointRegex.Match(originalConfig);
+            Logger.Log("Smart config generated: endpoint="
+                + (endpoint.Success ? endpoint.Groups[1].Value : "?")
+                + ", routes=" + routes.Split(',').Length + ", path=" + path);
             return path;
         }
 

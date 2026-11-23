@@ -45,6 +45,7 @@ $sources = Get-ChildItem -Path (Join-Path $PSScriptRoot 'src') -Filter '*.cs' |
 
 $arguments = @(
     '/nologo',
+    '/codepage:65001',
     '/target:winexe',
     '/platform:anycpu',
     '/optimize+',

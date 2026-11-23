@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Diagnostics;
@@ -350,13 +350,43 @@ namespace LiteTunnel
             if (exe == null)
                 throw new InvalidOperationException("未检测到 WireGuard for Windows，请先安装。");
 
+            Logger.Log("wireguard.exe /installtunnelservice " + configPath);
             string output;
-            int code = Run(exe, "/installtunnelservice \"" + configPath + "\"", 20000, out output);
+            int code = Run(exe, "/installtunnelservice \"" + configPath + "\"", 30000, out output);
+            Logger.Log("installtunnelservice exit=" + code + ", output=" + (output ?? string.Empty));
             if (code != 0)
                 throw new Exception("创建 WireGuard 隧道失败（退出码 " + code + "）。\r\n" + output);
 
             if (!WaitForService(tunnelName, true, 30000))
-                throw new Exception("WireGuard 隧道服务未能在 30 秒内启动，请检查配置或 Windows 事件查看器。");
+            {
+                Logger.Log("Tunnel service not running within 30s: " + tunnelName);
+                throw new Exception("WireGuard 隧道服务未能在 30 秒内启动，请查看日志或 Windows 事件查看器。");
+            }
+            Logger.Log("Tunnel service Running: " + tunnelName);
+        }
+
+        public static string GetTunnelDiagnostics(string tunnelName)
+        {
+            try
+            {
+                string exe = FindWireGuardExe();
+                if (exe == null)
+                    return "未找到 WireGuard";
+                string wg = Path.Combine(Path.GetDirectoryName(exe), "wg.exe");
+                if (!File.Exists(wg))
+                    return "未找到 wg.exe";
+
+                string handshake;
+                Run(wg, "show " + tunnelName + " latest-handshakes", 10000, out handshake);
+                string transfer;
+                Run(wg, "show " + tunnelName + " transfer", 10000, out transfer);
+                return "handshake=[" + (handshake ?? string.Empty).Trim()
+                    + "] transfer=[" + (transfer ?? string.Empty).Trim() + "]";
+            }
+            catch (Exception ex)
+            {
+                return "读取诊断失败：" + ex.Message;
+            }
         }
 
         public static void StopTunnel(string tunnelName)

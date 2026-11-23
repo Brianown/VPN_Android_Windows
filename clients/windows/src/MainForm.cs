@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
@@ -221,7 +221,8 @@ namespace LiteTunnel
             openFolderButton = MakeButton("配置目录", false);
             deleteButton = MakeButton("删除", false);
             aboutButton = MakeButton("关于", false);
-
+            Button logButton = MakeButton("日志", false);
+            logButton.Click += delegate { Logger.Open(); };
             importButton.Click += delegate { ImportProfiles(); };
             pasteButton.Click += delegate { PasteProfile(); };
             openFolderButton.Click += delegate { OpenProfileFolder(); };
@@ -233,6 +234,7 @@ namespace LiteTunnel
             panel.Controls.Add(openFolderButton);
             panel.Controls.Add(deleteButton);
             panel.Controls.Add(aboutButton);
+            panel.Controls.Add(logButton);
 
             Button exitButton = MakeButton("退出", false);
             exitButton.Click += delegate { ExitApplication(); };
@@ -667,17 +669,26 @@ namespace LiteTunnel
                 return;
 
             runningSmartMode = AppSettings.SmartMode;
+            Logger.Log("Connect: profile=" + profile.DisplayName + ", tunnel=" + profile.TunnelName
+                + ", smart=" + (runningSmartMode ? "on" : "off") + ", config=" + profile.FilePath);
             RunAsync("正在连接……", delegate
             {
                 if (activeTunnelName != null)
+                {
+                    Logger.Log("Stop old tunnel: " + activeTunnelName);
                     WireGuardManager.StopTunnel(activeTunnelName);
+                }
                 string configPath = profile.FilePath;
                 if (AppSettings.SmartMode)
                 {
                     string original = File.ReadAllText(profile.FilePath, Encoding.UTF8);
                     configPath = SmartRoute.BuildSmartConfig(profile, original);
+                    Logger.Log("Smart config generated: " + configPath);
                 }
+                Logger.Log("Start tunnel service: " + profile.TunnelName);
                 WireGuardManager.StartTunnel(configPath, profile.TunnelName);
+                Logger.Log("Tunnel service started: " + profile.TunnelName);
+                Logger.Log("Tunnel diagnostics: " + WireGuardManager.GetTunnelDiagnostics(profile.TunnelName));
             });
         }
 
@@ -753,6 +764,7 @@ namespace LiteTunnel
                 catch (Exception ex)
                 {
                     error = ex;
+                    Logger.Log("操作失败：" + ex);
                 }
                 if (IsDisposed)
                     return;
